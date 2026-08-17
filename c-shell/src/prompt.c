@@ -19,11 +19,16 @@ char* getUsername(void) {
     return "username"; // this happens in the case the getpwuid doesn't work.
 }
 
-char* getPath(char* str1,char* str2){
-    //(str1 = curr, str2 = home) directory
-    if(strcmp(str1,str2) == 0) return ""; // same string = only ~ 
-    if(strncmp(str1,str2,strlen(str2)) == 0) return (str1 + strlen(str2));
-    else return str1;
+char* getPath(char* str1, char* str2) {
+    // (str1 = curr, str2 = home) directory
+    size_t len2 = strlen(str2);
+    if (strcmp(str1, str2) == 0) return "";
+    if (strncmp(str1, str2, len2) == 0 && str1[len2] == '/') {
+        static char buf[4096];
+        snprintf(buf, sizeof(buf), "%s", str1 + len2);
+        return buf;
+    }
+    return str1;
 }
 
 void promptPrinter(){
