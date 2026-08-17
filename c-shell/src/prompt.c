@@ -4,6 +4,8 @@
 #include <string.h>
 #include <pwd.h>
 
+#include "prompt.h"
+
 static char homeDir[4096];
 char currDir[4096];
 void prompt_init(void) {
@@ -22,10 +24,10 @@ char* getUsername(void) {
 char* getPath(char* str1, char* str2) {
     // (str1 = curr, str2 = home) directory
     size_t len2 = strlen(str2);
-    if (strcmp(str1, str2) == 0) return "";
+    if (strcmp(str1, str2) == 0) return "~";
     if (strncmp(str1, str2, len2) == 0 && str1[len2] == '/') {
         static char buf[4096];
-        snprintf(buf, sizeof(buf), "%s", str1 + len2);
+        snprintf(buf, sizeof(buf), "~%s", str1 + len2);
         return buf;
     }
     return str1;
@@ -37,14 +39,14 @@ void promptPrinter(){
     //Code
         // prompt_init(); this will be innited in main so that the home directory is not changed during the execution.
     char* userName = getUsername();
-    strcpy(currDir,homeDir);
+    getcwd(currDir, sizeof(currDir));
     gethostname(host, sizeof(host));
     //Print for test
         // printf("Home dir = %s\nCurr dir = %s\n",homeDir,currDir);
         // printf("Name of the user %s\n",userName);
         // printf("Host : %s\n",host);
     //Final Print
-    printf("<%s@%s:~%s>",userName,host,getPath(currDir,homeDir));
+    printf("<%s@%s:%s>",userName,host,getPath(currDir,homeDir));
 }
 
 // int main(){
