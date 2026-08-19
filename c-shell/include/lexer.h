@@ -5,13 +5,13 @@
 
 typedef enum {
     TOK_WORD,
-    TOK_PIPE,  /* |  */
-    TOK_AMP,   /* &  */
-    TOK_SEMI,  /* ;  */
-    TOK_LT,    /* <  */
-    TOK_GT,    /* >  */
-    TOK_GTGT,  /* >> */
-    TOK_EOF
+    TOK_PIPE,  // |
+    TOK_AMP,   // & 
+    TOK_SEMI,  // ;  
+    TOK_LT,    // <  
+    TOK_GT,    // >  
+    TOK_GTGT,  // >> 
+    TOK_EOF // end of file token
 } TokenType;
 
 typedef struct Token {
