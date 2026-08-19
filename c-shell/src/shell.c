@@ -1,18 +1,44 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "prompt.h"
+#include "lexer.h"
+
+#define STRING_SIZE 4096
 
 int main(){
     //INIT THE HOME DIR
     prompt_init();
-    
+    char command[STRING_SIZE];
     while(1){
-        //Definations
-        char command[4096];
-        char *prompt;
-        //Code
-        prompt = promptPrinter(); 
+    //Definations
+        char *prompt = NULL;
+
+    //Code
+        //print prompt
+        prompt = prompt_printer(); 
         printf(prompt); // prints the prompt
-        scanf("%s",command);
+        //Take command
+        if(fgets(command, STRING_SIZE, stdin) == NULL){
+            printf("\n");
+            break;
+        }
+        int scan_val = strlen(command);
+        if(scan_val == -1){
+            printf("\n");
+            break;
+        }
+        if(scan_val > 0 && command[scan_val - 1] == '\n'){
+            command[scan_val - 1] = '\0'; // removes \n puts \0
+        }
+        if(strcmp(command,"exit()") == 0){
+            printf("Bye bye ...");
+            return 0;
+        }
+        TokenList tokens;
+        if(lex_line(command, &tokens) != 0) continue; // goto alloc_fail
+        tokenlist_free(&tokens);
     }
+    // free(command);
     return 0;
 }

@@ -6,52 +6,54 @@
 
 #include "prompt.h"
 
-static char homeDir[4096];
-char currDir[4096];
-void prompt_init(void) {
-    getcwd(homeDir, sizeof(homeDir));
+#define STRING_SIZE 4096
+
+static char home_dir[STRING_SIZE];
+char curr_dir[STRING_SIZE];
+void prompt_init(void){
+    getcwd(home_dir, sizeof(home_dir));
 }
 
 
-char* getUsername(void) {
+char* get_username(void){
     struct passwd *pw = getpwuid(geteuid());
-    if (pw != NULL && pw->pw_name != NULL) {
+    if(pw != NULL && pw->pw_name != NULL){
         return pw->pw_name;
     }
     return "username"; // this happens in the case the getpwuid doesn't work.
 }
 
-char* getPath(char* str1, char* str2) {
+char* get_path(char* str1, char* str2){
     // (str1 = curr, str2 = home) directory
-    size_t len2 = strlen(str2);
-    if (strcmp(str1, str2) == 0) return "~";
-    if (strncmp(str1, str2, len2) == 0 && str1[len2] == '/') {
-        static char buf[4096];
+    int len2 = strlen(str2);
+    if(strcmp(str1, str2) == 0) return "~";
+    if(strncmp(str1, str2, len2) == 0 && str1[len2] == '/'){
+        static char buf[STRING_SIZE];
         snprintf(buf, sizeof(buf), "~%s", str1 + len2);
         return buf;
     }
     return str1;
 }
 
-char* promptPrinter(){
+char* prompt_printer(){
     //Definations
     char host[256];
-    static char promptFinal[4096];
+    static char prompt_final[STRING_SIZE];
     //Code
         // prompt_init(); this will be innited in main so that the home directory is not changed during the execution.
-    char* userName = getUsername();
-    getcwd(currDir, sizeof(currDir));
+    char* user_name = get_username();
+    getcwd(curr_dir, sizeof(curr_dir));
     gethostname(host, sizeof(host));
     //Print for test
-        // printf("Home dir = %s\nCurr dir = %s\n",homeDir,currDir);
-        // printf("Name of the user %s\n",userName);
+        // printf("Home dir = %s\nCurr dir = %s\n",home_dir,curr_dir);
+        // printf("Name of the user %s\n",user_name);
         // printf("Host : %s\n",host);
     //Final Print
-    sprintf(promptFinal,"<%s@%s:%s>",userName,host,getPath(currDir,homeDir));
-    return promptFinal;
+    sprintf(prompt_final,"<%s@%s:%s>",user_name,host,get_path(curr_dir,home_dir));
+    return prompt_final;
 }
 
 // int main(){
-//     promptPrinter();
+//     prompt_printer();
 //     return 0;
 // }
