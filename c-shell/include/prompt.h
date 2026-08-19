@@ -2,6 +2,6 @@
 #define PROMPT_H
 
 void prompt_init(void);
-void promptPrinter(void);
+char* promptPrinter(void);
 
 #endif

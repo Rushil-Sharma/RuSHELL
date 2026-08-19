@@ -33,9 +33,10 @@ char* getPath(char* str1, char* str2) {
     return str1;
 }
 
-void promptPrinter(){
+char* promptPrinter(){
     //Definations
     char host[256];
+    static char promptFinal[4096];
     //Code
         // prompt_init(); this will be innited in main so that the home directory is not changed during the execution.
     char* userName = getUsername();
@@ -46,7 +47,8 @@ void promptPrinter(){
         // printf("Name of the user %s\n",userName);
         // printf("Host : %s\n",host);
     //Final Print
-    printf("<%s@%s:%s>",userName,host,getPath(currDir,homeDir));
+    sprintf(promptFinal,"<%s@%s:%s>",userName,host,getPath(currDir,homeDir));
+    return promptFinal;
 }
 
 // int main(){

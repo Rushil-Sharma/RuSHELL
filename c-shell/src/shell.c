@@ -6,7 +6,13 @@ int main(){
     prompt_init();
     
     while(1){
-        promptPrinter(); // prints the prompt
+        //Definations
+        char command[4096];
+        char *prompt;
+        //Code
+        prompt = promptPrinter(); 
+        printf(prompt); // prints the prompt
+        scanf("%s",command);
     }
     return 0;
 }
