@@ -5,12 +5,14 @@
 #include "prompt.h"
 #include "lexer.h"
 #include "parser.h"
+#include "hop.h"
 
 #define STRING_SIZE 4096
 
 int main(){
     //INIT THE HOME DIR
-    prompt_init();
+    char* home_directory;
+    home_directory = prompt_init();
     char command[STRING_SIZE];
     while(1){
     //Definations
@@ -48,8 +50,20 @@ int main(){
             printf("cshell: invalid syntax\n");
         }
 
+        // Hop
+        char *argv[100];
+        int argc = 0;
+        char *word = strtok(command, " \t");
+        while (word != NULL && argc < 99) {
+            argv[argc++] = word;
+            word = strtok(NULL, " \t");
+        }
+        argv[argc] = NULL;
+        hop(argc, argv,home_directory);
+
         tokenlist_free(&tokens);
     }
     // free(command);
+    free(home_directory);
     return 0;
 }

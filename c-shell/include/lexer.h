@@ -29,14 +29,6 @@ typedef struct {
 void tokenlist_init(TokenList *list);
 void tokenlist_free(TokenList *list);
 
-/*
- * Lexes a single input line into a TokenList (terminated internally by
- * a TOK_EOF sentinel appended as the tail).
- *
- * Returns 0 on success.
- * Returns -1 on a lexical error, in which case "cshell: invalid syntax"
- * has already been printed to stdout and *out has been freed/reset.
- */
 int lex_line(const char *line, TokenList *out);
 
 #endif /* LEXER_H */
