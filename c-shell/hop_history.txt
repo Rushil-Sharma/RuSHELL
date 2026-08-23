@@ -1,9 +1,0 @@
-/usr	1	1787503455
-/	3	1787503449
-/mnt	1	1787503438
-/mnt/c	1	1787503437
-/mnt/c/Users	2	1787503434
-/mnt/c/Users/Rushil	2	1787503433
-/mnt/c/Users/Rushil/Desktop	2	1787503431
-/mnt/c/Users/Rushil/Desktop/RuSHELL	2	1787503426
-/mnt/c/Users/Rushil/Desktop/RuSHELL/c-shell	3	1787503517

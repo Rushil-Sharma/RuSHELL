@@ -8,6 +8,7 @@
 #include "hop.h"
 #include "reveal.h"
 #include "locate.h"
+#include "exec.h"
 
 #define STRING_SIZE 4096
 
@@ -80,7 +81,7 @@ int main(){
         if(strcmp(argv[0],"hop") == 0) hop(argc, argv,home_directory);
         else if(strcmp(argv[0],"reveal") == 0) reveal_command(argv,argc,home_directory);
         else if(strcmp(argv[0], "locate") == 0) locate(argv,argc);
-
+        else execute_command(argv);
         tokenlist_free(&tokens);
     }
     // free(command);
