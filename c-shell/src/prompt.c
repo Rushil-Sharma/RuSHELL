@@ -50,7 +50,7 @@ char* prompt_printer(){
         // printf("Name of the user %s\n",user_name);
         // printf("Host : %s\n",host);
     //Final Print
-    sprintf(prompt_final,"<%s@%s:%s>",user_name,host,get_path(curr_dir,home_dir));
+    sprintf(prompt_final,"\x1b[36m<\x1b[32m%s@%s\x1b[0m\x1b[36m:%s>\x1b[0m",user_name,host,get_path(curr_dir,home_dir));
     return prompt_final;
 }
 

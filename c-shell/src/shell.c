@@ -7,10 +7,22 @@
 #include "parser.h"
 #include "hop.h"
 #include "reveal.h"
+#include "locate.h"
 
 #define STRING_SIZE 4096
 
 int main(){
+    // Print the welcome text
+    printf("\x1b[34m"
+        "┌────────────────────────────────────────────────────────────────┐\n"
+        "│__________       _________ ___ ______________.____    .____     │\n"
+        "│\\______   \\__ __/   _____//   |   \\_   _____/|    |   |    |    │\n"
+        "│ |       _/  |  \\_____  \\/    ~    \\    __)_ |    |   |    |    │\n"
+        "│ |    |   \\  |  /        \\    Y    /        \\|    |___|    |___ │\n"
+        "│ |____|_  /____/_______  /\\___|_  /_______  /|_______ \\_______ \\│\n"
+        "│        \\/             \\/       \\/        \\/         \\/       \\/│\n"
+        "└────────────────────────────────────────────────────────────────┘\n"
+    "\x1b[0m");
     //INIT THE HOME DIR
     char* home_directory;
     home_directory = prompt_init();
@@ -27,7 +39,7 @@ int main(){
     //Code
         //print prompt
         prompt = prompt_printer(); 
-        printf("%s ",prompt); // prints the prompt
+        printf("%s ",prompt); // prints the prompt 
 
         //Take command
         if(fgets(command, STRING_SIZE, stdin) == NULL){
@@ -55,7 +67,7 @@ int main(){
         if(!parse_validate(&tokens)){
             printf("cshell: invalid syntax\n");
         }
-
+        if(strlen(command) == 0) continue;
         // Hop
         char *argv[100];
         int argc = 0;
@@ -67,6 +79,7 @@ int main(){
         argv[argc] = NULL;
         if(strcmp(argv[0],"hop") == 0) hop(argc, argv,home_directory);
         else if(strcmp(argv[0],"reveal") == 0) reveal_command(argv,argc,home_directory);
+        else if(strcmp(argv[0], "locate") == 0) locate(argv,argc);
 
         tokenlist_free(&tokens);
     }
