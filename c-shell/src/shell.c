@@ -6,6 +6,7 @@
 #include "lexer.h"
 #include "parser.h"
 #include "hop.h"
+#include "reveal.h"
 
 #define STRING_SIZE 4096
 
@@ -14,6 +15,11 @@ int main(){
     char* home_directory;
     home_directory = prompt_init();
     char command[STRING_SIZE];
+    // Clear hop_history & pre_dir.txt;
+    FILE *file_ptr = fopen("./hop_history.txt", "w");
+    fclose(file_ptr);
+    FILE *file_ptr2 = fopen("./prev_dir.txt", "w");
+    fclose(file_ptr2);
     while(1){
     //Definations
         char *prompt = NULL;
@@ -21,7 +27,7 @@ int main(){
     //Code
         //print prompt
         prompt = prompt_printer(); 
-        printf("%s",prompt); // prints the prompt
+        printf("%s ",prompt); // prints the prompt
 
         //Take command
         if(fgets(command, STRING_SIZE, stdin) == NULL){
@@ -37,7 +43,7 @@ int main(){
             command[scan_val - 1] = '\0'; // removes \n puts \0
         }
         if(strcmp(command,"exit()") == 0){
-            printf("Bye bye ...");
+            printf("Bye bye ...\n");
             return 0;
         }
 
@@ -59,7 +65,8 @@ int main(){
             word = strtok(NULL, " \t");
         }
         argv[argc] = NULL;
-        hop(argc, argv,home_directory);
+        if(strcmp(argv[0],"hop") == 0) hop(argc, argv,home_directory);
+        else if(strcmp(argv[0],"reveal") == 0) reveal_command(argv,argc,home_directory);
 
         tokenlist_free(&tokens);
     }

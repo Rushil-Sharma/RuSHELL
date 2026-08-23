@@ -134,7 +134,7 @@ static void save_history(void){
     fclose(file);
 }
 
-static int change_directory(char* target){
+static int change_directory(char* target,char* home){
     char current_dir[STRING_SIZE];
 
     if(getcwd(current_dir,STRING_SIZE) == 0) return 0; // error in getting curr dir
@@ -142,6 +142,15 @@ static int change_directory(char* target){
     if(chdir(target) != 0) return 0; // not able to change 
 
     strcpy(previous_dir,current_dir);
+    
+    char prev_path[STRING_SIZE];
+    snprintf(prev_path, sizeof(prev_path), "%s/prev_dir.txt", home);
+    FILE *file = fopen(prev_path, "w");
+    if(file != NULL){
+        fprintf(file, "%s\n", previous_dir);
+        fclose(file);
+    }
+
 
     char new_dir[STRING_SIZE];
 
@@ -186,7 +195,7 @@ int hop(int argc, char* argv[],char* home_dir){
 
     if(argc == 1){
         char *home = home_directory;
-        if (home == NULL || !change_directory(home)) printf("hop: no such directory\n");
+        if (home == NULL || !change_directory(home,home_directory)) printf("hop: no such directory\n");
         return 0;
     }
 
@@ -196,31 +205,31 @@ int hop(int argc, char* argv[],char* home_dir){
         if(strcmp(argument,"~") == 0){
             // write ~
             char *home = home_directory;
-            if (home == NULL || !change_directory(home)) printf("hop: no such directory\n");
+            if (home == NULL || !change_directory(home,home_directory)) printf("hop: no such directory\n");
             continue;
         }
 
         if(strcmp(argument,".") == 0) continue;
 
         if(strcmp(argument,"..") == 0){
-            change_directory("..");
+            change_directory("..",home_directory);
             continue;
         }
 
         if(strcmp(argument,"-") == 0){
             if(previous_dir[0] == '\0') continue;
-            change_directory(previous_dir);
+            change_directory(previous_dir,home_directory);
             continue;
         }
 
-        if(change_directory(argument)){
+        if(change_directory(argument,home_directory)){
             continue;
         }
 
         HopNode *match = find_best_match(argument);
 
         if(match != NULL){
-            if(!change_directory(match->path)){
+            if(!change_directory(match->path,home_directory)){
                 printf("hop: no such directory\n");
             }
         }else{
