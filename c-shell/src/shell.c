@@ -1,4 +1,4 @@
-    #include <stdio.h>
+#include <stdio.h>
     #include <stdlib.h>
     #include <string.h>
 
@@ -107,27 +107,35 @@
                         cur = cur->next;
                     } else if (cur->type == TOK_LT) {
                         cur = cur->next; // parser guarantees this is TOK_WORD
-                        stage_input_files[s][stage_input_count[s]++] = cur->value;
+                        if (stage_input_count[s] < MAX_ARGS - 1) {
+                            stage_input_files[s][stage_input_count[s]++] = cur->value;
+                        }
                         cur = cur->next;
                     } else if (cur->type == TOK_GT) {
                         cur = cur->next; // parser guarantees this is TOK_WORD
-                        stage_output_files[s][stage_output_count[s]] = cur->value;
-                        stage_append_flags[s][stage_output_count[s]] = 0; // truncate
-                        stage_output_count[s]++;
+                        if (stage_output_count[s] < MAX_ARGS - 1) {
+                            stage_output_files[s][stage_output_count[s]] = cur->value;
+                            stage_append_flags[s][stage_output_count[s]] = 0; // truncate
+                            stage_output_count[s]++;
+                        }
                         cur = cur->next;
                     } else if (cur->type == TOK_GTGT) {
                         cur = cur->next; // parser guarantees this is TOK_WORD
-                        stage_output_files[s][stage_output_count[s]] = cur->value;
-                        stage_append_flags[s][stage_output_count[s]] = 1; // append
-                        stage_output_count[s]++;
+                        if (stage_output_count[s] < MAX_ARGS - 1) {
+                            stage_output_files[s][stage_output_count[s]] = cur->value;
+                            stage_append_flags[s][stage_output_count[s]] = 1; // append
+                            stage_output_count[s]++;
+                        }
                         cur = cur->next;
                     } else if (cur->type == TOK_WORD) {
                         if (argc < MAX_ARGS - 1) {
                             stage_argv[s][argc++] = cur->value;
                         }
                         cur = cur->next;
+                    } else if (cur->type == TOK_SEMI || cur->type == TOK_AMP) {
+                        break;
                     } else {
-                        // TOK_AMP / TOK_SEMI not handled by this pipeline builder
+                        // unreachable given parse_validate(), kept defensively
                         pipeline_syntax_error = 1;
                         break;
                     }
@@ -175,7 +183,5 @@
 
             tokenlist_free(&tokens);
         }
-        // free(command);
-        free(home_directory);
         return 0;
     }
