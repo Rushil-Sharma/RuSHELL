@@ -47,6 +47,10 @@ static int peek_parse_args(int argc, char *argv[], PeekOptions *ops,const char *
                 if (*p == 'n') ops->numbered = true;
                 else if (*p == 'r') ops->reversed = true;
             }
+        } else if (arg[0] == '-' && arg[1] != '\0') {
+            // hyphen-prefixed argument that isn't a valid -n/-r flag combo;
+            // filenames starting with '-' are not supported (per spec Q&A)
+            return -1;
         } else {
             filenames_out[fcount++] = arg;
         }
@@ -355,6 +359,12 @@ int peek_command(int argc, char *argv[]) {
 
     PeekOptions ops;
     int fcount = peek_parse_args(argc, argv, &ops, filenames);
+
+    if (fcount == -1) {
+        printf("peek: invalid syntax\n");
+        free(filenames);
+        return 1;
+    }
 
     bool any_error = false;
     long running_no = 0;

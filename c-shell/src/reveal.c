@@ -135,30 +135,44 @@ static int resolve_reveal_path(const char* arg,char *resolved,int resolved_size,
     return 0;
 }
 
+static int reveal_is_flag_arg(const char *arg){
+    if(arg[0] != '-') return 0;
+    if(arg[1] == '\0') return 0;
+    for(const char *p = arg + 1; *p; p++){
+        if(*p != 'a' && *p != 't') return 0;
+    }
+    return 1;
+}
+
 void reveal_command(char **args, int argc, const char *home_dir){
     int reveal_all = 0, recursive = 0;
     char *path_arg = NULL;
     int path_arg_count = 0;
+    int seen_path_arg = 0; // set once a non-flag arg has been consumed
+    int syntax_error = 0;
 
     for(int i=1;i<argc;i++){
-        if(args[i][0] == '-' && strlen(args[i]) > 1 && (args[i][1] == 'a' || args[i][1] == 't')){
+        if(reveal_is_flag_arg(args[i])){
+            if(seen_path_arg){
+                // flags must come before the path argument
+                syntax_error = 1;
+                continue;
+            }
             for(int j=1;j< (int)strlen(args[i]);j++){
                 if(args[i][j] == 'a') reveal_all = 1;
                 else if(args[i][j] == 't') recursive = 1;
-                else{
-                    printf("reveal: invalid syntax\n");
-                }
             }
         }
         else{
             path_arg_count += 1;
-            // strcpy(path_arg,args[i]); 
             path_arg = args[i];
+            seen_path_arg = 1;
         }
     }
 
-    if(path_arg_count > 1){
+    if(syntax_error || path_arg_count > 1){
         printf("reveal: invalid syntax\n");
+        return;
     }
 
     char resolved[BIGGER_BUFFER];

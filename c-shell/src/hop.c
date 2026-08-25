@@ -205,20 +205,29 @@ int hop(int argc, char* argv[],char* home_dir){
         if(strcmp(argument,"~") == 0){
             // write ~
             char *home = home_directory;
-            if (home == NULL || !change_directory(home,home_directory)) printf("hop: no such directory\n");
+            if (home == NULL || !change_directory(home,home_directory)) {
+                printf("hop: no such directory\n");
+                break; // stop at the last valid hop
+            }
             continue;
         }
 
         if(strcmp(argument,".") == 0) continue;
 
         if(strcmp(argument,"..") == 0){
-            change_directory("..",home_directory);
+            if(!change_directory("..",home_directory)){
+                printf("hop: no such directory\n");
+                break; // stop at the last valid hop
+            }
             continue;
         }
 
         if(strcmp(argument,"-") == 0){
             if(previous_dir[0] == '\0') continue;
-            change_directory(previous_dir,home_directory);
+            if(!change_directory(previous_dir,home_directory)){
+                printf("hop: no such directory\n");
+                break; // stop at the last valid hop
+            }
             continue;
         }
 
@@ -231,9 +240,11 @@ int hop(int argc, char* argv[],char* home_dir){
         if(match != NULL){
             if(!change_directory(match->path,home_directory)){
                 printf("hop: no such directory\n");
+                break; // stop at the last valid hop
             }
         }else{
             printf("hop: no such directory\n");
+            break; // stop at the last valid hop
         }
 
     }
