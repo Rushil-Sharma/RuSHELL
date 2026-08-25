@@ -70,7 +70,7 @@ static int write_all(int fd, const char *buf, int n) {
 
 // opens every input file in order and streams contents into a pipe so that multiple "< f1 < f2" behave like one continuous stdin
 // then returns read end of pipe, or -1 on error
-static int setup_input_redirection(char **input_files, int input_count, int *writer_pid_out) {
+static int setup_input_redirection(char **input_files, int input_count,int *writer_pid_out,int (*pipefds)[2], int num_pipes) {
     *writer_pid_out = -1;
 
     int pipefd[2];
@@ -94,6 +94,11 @@ static int setup_input_redirection(char **input_files, int input_count, int *wri
     int pid = fork();
     if (pid == 0) {
         close(pipefd[0]);
+        // The helper should not keep any pipeline pipe open.
+        for (int i = 0; i < num_pipes; i++) {
+            close(pipefds[i][0]);
+            close(pipefds[i][1]);
+        }
         char buf[4096];
         for (int i = 0; i < input_count; i++) {
             int n;
@@ -130,7 +135,7 @@ static int open_output_files(char **output_files, int *append_flags, int output_
 
 // reads everything the command writes from a pipe and dupes it into every output file
 // runs as its own process so the command can just write to one fd without knowing about other files
-static int setup_output_redirection(char **output_files, int *append_flags, int output_count, int *reader_pid_out) {
+static int setup_output_redirection(char **output_files, int *append_flags,int output_count, int *reader_pid_out,int (*pipefds)[2], int num_pipes) {
     *reader_pid_out = -1;
 
     int out_fds[output_count];
@@ -147,7 +152,11 @@ static int setup_output_redirection(char **output_files, int *append_flags, int 
 
     int pid = fork();
     if (pid == 0) {
-        close(pipefd[1]); // reader doesn't need the write end
+        close(pipefd[1]);
+        for (int i = 0; i < num_pipes; i++) {
+            close(pipefds[i][0]);
+            close(pipefds[i][1]);
+        }
         char buf[4096];
         int n;
         while ((n = read(pipefd[0], buf, sizeof(buf))) > 0) {
@@ -179,7 +188,7 @@ void execute_with_redirection(char **args,char **input_files, int input_count,ch
     int writer_pid = -1, reader_pid = -1;
     int in_fd = -1;
     if (input_count > 0) {
-        in_fd = setup_input_redirection(input_files, input_count, &writer_pid);
+        in_fd = setup_input_redirection(input_files, input_count,&writer_pid, NULL, 0);
         if (in_fd == -1) {
             free(resolved);
             return; // error already printed
@@ -188,7 +197,7 @@ void execute_with_redirection(char **args,char **input_files, int input_count,ch
 
     int out_fd = -1;
     if (output_count > 0) {
-        out_fd = setup_output_redirection(output_files, append_flags, output_count, &reader_pid);
+        out_fd = setup_output_redirection(output_files, append_flags,output_count, &reader_pid, NULL, 0);
         if (out_fd == -1) {
             if (in_fd != -1) close(in_fd);
             if (writer_pid > 0) waitpid(writer_pid, NULL, 0);
@@ -227,4 +236,139 @@ void execute_with_redirection(char **args,char **input_files, int input_count,ch
     }
 
     free(resolved);
+}
+
+// closes both ends of every pipe in pipefds[0..num_pipes-1]
+static void close_all_pipes(int (*pipefds)[2], int num_pipes) {
+    for (int i = 0; i < num_pipes; i++) {
+        if (pipefds[i][0] != -1) close(pipefds[i][0]);
+        if (pipefds[i][1] != -1) close(pipefds[i][1]);
+    }
+}
+
+// runs a full pipeline of commands, wiring stdout of stage i to stdin of
+// stage i+1 via pipe(), while still honoring any per-stage file redirection
+// (e.g. "cmd1 < in.txt | cmd2 > out.txt").
+void execute_pipeline(command_stage *stages, int num_stages) {
+    if (num_stages <= 0) return;
+
+    // a "pipeline" of one command is just a normal redirected command
+    if (num_stages == 1) {
+        execute_with_redirection(stages[0].args,
+                                  stages[0].input_files, stages[0].input_count,
+                                  stages[0].output_files, stages[0].append_flags, stages[0].output_count);
+        return;
+    }
+
+    int num_pipes = num_stages - 1;
+    int pipefds[num_pipes][2];
+    for (int i = 0; i < num_pipes; i++) pipefds[i][0] = pipefds[i][1] = -1;
+
+    // 1. create every pipe up front (requirement 1)
+    for (int i = 0; i < num_pipes; i++) {
+        if (pipe(pipefds[i]) == -1) {
+            perror("pipe");
+            close_all_pipes(pipefds, num_pipes);
+            return;
+        }
+    }
+
+    char *resolved[num_stages];
+    int writer_pid[num_stages], reader_pid[num_stages];
+    int in_fd[num_stages], out_fd[num_stages];   // extra fds from file redirection, -1 if none
+    int child_pid[num_stages];
+    int aborted = 0;
+
+    for (int i = 0; i < num_stages; i++) {
+        resolved[i] = NULL;
+        writer_pid[i] = reader_pid[i] = -1;
+        in_fd[i] = out_fd[i] = -1;
+        child_pid[i] = -1;
+    }
+
+    // 2. set up any file redirection each stage asks for, and resolve each
+    //    command's path, before forking anything for the pipeline itself.
+    //    Doing this in the parent means "command not found" / file errors
+    //    print to the real terminal, never into a pipe.
+    for (int i = 0; i < num_stages && !aborted; i++) {
+        if (stages[i].input_count > 0) {
+            in_fd[i] = setup_input_redirection(stages[i].input_files,stages[i].input_count,&writer_pid[i],pipefds, num_pipes);
+            if (in_fd[i] == -1) { aborted = 1; break; } // error already printed
+        }
+        if (stages[i].output_count > 0) {
+            out_fd[i] = setup_output_redirection(stages[i].output_files,stages[i].append_flags,stages[i].output_count,&reader_pid[i],pipefds, num_pipes);
+            if (out_fd[i] == -1) { aborted = 1; break; } // error already printed
+        }
+        resolved[i] = resolve_command(stages[i].args[0]);
+        if (resolved[i] == NULL) {
+            // requirement 8: report this stage's failure, but keep going -
+            // the rest of the pipeline still runs. We simply never fork a
+            // process for this stage; its pipe fds get closed by the parent
+            // below like normal, which sends EOF downstream correctly.
+            printf("cshell: command not found (%s)\n", stages[i].args[0]);
+        }
+    }
+
+    if (aborted) {
+        for (int i = 0; i < num_stages; i++) {
+            if (resolved[i]) free(resolved[i]);
+            if (in_fd[i] != -1) close(in_fd[i]);
+            if (out_fd[i] != -1) close(out_fd[i]);
+            if (writer_pid[i] > 0) waitpid(writer_pid[i], NULL, 0);
+            if (reader_pid[i] > 0) waitpid(reader_pid[i], NULL, 0);
+        }
+        close_all_pipes(pipefds, num_pipes);
+        return;
+    }
+
+    // 3. fork one child per stage that resolved successfully (requirement 2)
+    for (int i = 0; i < num_stages; i++) {
+        if (resolved[i] == NULL) continue; // stage failed to resolve, skip it
+
+        int pid = fork();
+        if (pid == 0) {
+            // stdin: file redirection > previous pipe > inherited stdin
+            if (stages[i].input_count > 0) {
+                dup2(in_fd[i], STDIN_FILENO);
+            } else if (i > 0) {
+                dup2(pipefds[i - 1][0], STDIN_FILENO); // requirement 4
+            }
+
+            // stdout: file redirection > next pipe > inherited stdout
+            if (stages[i].output_count > 0) {
+                dup2(out_fd[i], STDOUT_FILENO);
+            } else if (i < num_stages - 1) {
+                dup2(pipefds[i][1], STDOUT_FILENO); // requirement 3
+            }
+
+            // child closes every pipe fd it doesn't need anymore (requirement 6)
+            close_all_pipes(pipefds, num_pipes);
+            if (in_fd[i] != -1) close(in_fd[i]);
+            if (out_fd[i] != -1) close(out_fd[i]);
+
+            execv(resolved[i], stages[i].args);
+            perror("execv");
+            exit(1);
+        } else if (pid > 0) {
+            child_pid[i] = pid;
+        } else {
+            perror("fork");
+        }
+    }
+
+    // 4. parent closes every pipe fd and file-redirection fd it holds
+    //    (requirement 5), now that all children have their own copies
+    close_all_pipes(pipefds, num_pipes);
+    for (int i = 0; i < num_stages; i++) {
+        if (in_fd[i] != -1) close(in_fd[i]);
+        if (out_fd[i] != -1) close(out_fd[i]);
+    }
+
+    // 5. wait for every stage and every redirection helper (requirement 7)
+    for (int i = 0; i < num_stages; i++) {
+        if (child_pid[i] > 0) waitpid(child_pid[i], NULL, 0);
+        if (writer_pid[i] > 0) waitpid(writer_pid[i], NULL, 0);
+        if (reader_pid[i] > 0) waitpid(reader_pid[i], NULL, 0);
+        if (resolved[i]) free(resolved[i]);
+    }
 }
