@@ -10,6 +10,7 @@
     #include "locate.h"
     #include "exec.h"
     #include "redirect.h"
+    #include "peek.h"
 
     #define STRING_SIZE 4096
     #define MAX_STAGES 64
@@ -166,6 +167,7 @@
                 if(strcmp(argv[0],"hop") == 0) hop(argc, argv,home_directory);
                 else if(strcmp(argv[0],"reveal") == 0) reveal_command(argv,argc,home_directory);
                 else if(strcmp(argv[0], "locate") == 0) locate(argv,argc);
+                else if(strcmp(argv[0],"peek") == 0) peek_command(argc,argv);
                 else execute_with_redirection(argv, stage_input_files[0], stage_input_count[0],stage_output_files[0], stage_append_flags[0], stage_output_count[0]);
             } else {
                 // pipeline
