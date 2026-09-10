@@ -1,7 +1,7 @@
 #ifndef REDIRECT_H
 #define REDIRECT_H
 
-void execute_with_redirection(char **args,char **input_files, int input_count,char **output_files, int *append_flags, int output_count);
+int execute_with_redirection(char **args,char **input_files, int input_count,char **output_files, int *append_flags, int output_count);
 
 typedef struct {
     char **args;          // argv-style command, NULL-terminated
@@ -12,6 +12,7 @@ typedef struct {
     int output_count;
 } command_stage;
  
-void execute_pipeline(command_stage *stages, int num_stages);
+int execute_pipeline(command_stage *stages, int num_stages);
+int execute_background(command_stage *stages, int num_stages);
 
 #endif

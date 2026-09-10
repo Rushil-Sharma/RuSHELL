@@ -22,7 +22,13 @@ int parse_validate(const TokenList *tokens){
             curr = curr->next; // as it is tok_word anyway.
 
         }
-        else if(curr->type == TOK_PIPE || curr->type == TOK_SEMI){
+        else if(curr->type == TOK_SEMI){
+            curr = curr->next;
+            if(curr == NULL || curr->type == TOK_EOF) return 1;
+            if(curr->type != TOK_WORD) return 0;
+            curr = curr->next;
+        }
+        else if(curr->type == TOK_PIPE){
             curr = curr->next;
             if(curr == NULL || curr->type != TOK_WORD) return 0;
             curr = curr->next;

@@ -11,10 +11,16 @@
 #include "exec.h"
 #include "redirect.h"
 #include "peek.h"
+#include "jobs.h"
 
 #define STRING_SIZE 4096
 #define MAX_STAGES 64
 #define MAX_ARGS 100
+
+static int is_builtin(const char *name) {
+    if(strcmp(name,"hop") == 0 || strcmp(name,"reveal") == 0 || strcmp(name,"locate") == 0 || strcmp(name,"peek") == 0) return 1;
+    return 0;
+}
 
 int main(){
     // Print the welcome text
@@ -37,6 +43,8 @@ int main(){
     fclose(file_ptr);
     FILE *file_ptr2 = fopen("./prev_dir.txt", "w");
     fclose(file_ptr2);
+    
+    jobs_init(); // initializing SIGCHLD handler for background jobs 
     while(1){
     //Definations
         char *prompt = NULL;
@@ -45,12 +53,15 @@ int main(){
         //print prompt
         prompt = prompt_printer(); 
         printf("%s ",prompt); // prints the prompt 
+        set_at_prompt(1); // shell is at prompt, waiting for user
 
         //Take command
         if(fgets(command, STRING_SIZE, stdin) == NULL){
+            set_at_prompt(0); // shell is no longer at prompt
             printf("\n");
             break;
         }
+        set_at_prompt(0);
         int scan_val = strlen(command);
         if(scan_val == -1){
             printf("\n");
@@ -79,24 +90,30 @@ int main(){
             continue;
         }
 
-        // ---- split the tokens into pipeline stages on TOK_PIPE ----
-        char *stage_argv[MAX_STAGES][MAX_ARGS];
-        char *stage_input_files[MAX_STAGES][MAX_ARGS];
-        int stage_input_count[MAX_STAGES];
-        char *stage_output_files[MAX_STAGES][MAX_ARGS];
-        int stage_append_flags[MAX_STAGES][MAX_ARGS];
-        int stage_output_count[MAX_STAGES];
-        int num_stages = 0;
-        int pipeline_syntax_error = 0;
 
-        {
-            Token *cur = tokens.head;
+        Token *seg_start = tokens.head;
+
+        while (seg_start != NULL && seg_start->type != TOK_EOF) {
+
+            char *stage_argv[MAX_STAGES][MAX_ARGS];
+            char *stage_input_files[MAX_STAGES][MAX_ARGS];
+            int stage_input_count[MAX_STAGES];
+            char *stage_output_files[MAX_STAGES][MAX_ARGS];
+            int stage_append_flags[MAX_STAGES][MAX_ARGS];
+            int stage_output_count[MAX_STAGES];
+            int num_stages = 0;
+            int pipeline_syntax_error = 0;
+
+            Token *cur = seg_start;
             int s = 0;
             int argc = 0;
             stage_input_count[s] = 0;
             stage_output_count[s] = 0;
 
-            while (cur != NULL && cur->type != TOK_EOF) {
+            // parse tokens for THIS segment only: stop at TOK_SEMI/TOK_AMP/TOK_EOF
+            while (cur != NULL && cur->type != TOK_EOF &&
+                   cur->type != TOK_SEMI && cur->type != TOK_AMP) {
+
                 if (cur->type == TOK_PIPE) {
                     stage_argv[s][argc] = NULL;
                     if (argc == 0) { pipeline_syntax_error = 1; break; }
@@ -133,8 +150,6 @@ int main(){
                         stage_argv[s][argc++] = cur->value;
                     }
                     cur = cur->next;
-                } else if (cur->type == TOK_SEMI || cur->type == TOK_AMP) {
-                    break;
                 } else {
                     // unreachable given parse_validate(), kept defensively
                     pipeline_syntax_error = 1;
@@ -145,45 +160,68 @@ int main(){
             if (!pipeline_syntax_error) {
                 stage_argv[s][argc] = NULL;
                 if (argc == 0) {
-                    pipeline_syntax_error = 1;
+                    // e.g. trailing ";" with nothing before EOF - just stop quietly
+                    num_stages = 0;
                 } else {
                     num_stages = s + 1;
                 }
             }
-        }
 
-        if (pipeline_syntax_error) {
-            printf("cshell: invalid syntax\n");
-            tokenlist_free(&tokens);
-            continue;
-        }
-
-        // single command, no "|" -> keep old built-in handling intact
-        if (num_stages == 1) {
-            char **argv = stage_argv[0];
-            int argc = 0;
-            while (argv[argc] != NULL) argc++;
-
-            if(strcmp(argv[0],"hop") == 0) hop(argc, argv,home_directory);
-            else if(strcmp(argv[0],"reveal") == 0) reveal_command(argv,argc,home_directory);
-            else if(strcmp(argv[0], "locate") == 0) locate(argv,argc);
-            else if(strcmp(argv[0],"peek") == 0) peek_command(argc,argv);
-            else execute_with_redirection(argv, stage_input_files[0], stage_input_count[0],stage_output_files[0], stage_append_flags[0], stage_output_count[0]);
-        } else {
-            // pipeline
-            command_stage stages[MAX_STAGES];
-            for (int s = 0; s < num_stages; s++) {
-                stages[s].args = stage_argv[s];
-                stages[s].input_files = stage_input_files[s];
-                stages[s].input_count = stage_input_count[s];
-                stages[s].output_files = stage_output_files[s];
-                stages[s].append_flags = stage_append_flags[s];
-                stages[s].output_count = stage_output_count[s];
+            if (pipeline_syntax_error) {
+                printf("cshell: invalid syntax\n");
+                break; // stop the whole line
             }
-            execute_pipeline(stages, num_stages);
+            int is_bg = (cur != NULL && cur->type == TOK_AMP); // checks if the ending is & (background process)
+
+            if (num_stages > 0) {
+                command_stage stages[MAX_STAGES];
+                for (int i = 0; i < num_stages; i++) {
+                    stages[i].args = stage_argv[i];
+                    stages[i].input_files = stage_input_files[i];
+                    stages[i].input_count = stage_input_count[i];
+                    stages[i].output_files = stage_output_files[i];
+                    stages[i].append_flags = stage_append_flags[i];
+                    stages[i].output_count = stage_output_count[i];
+                }
+
+                char **argv0 = stage_argv[0];
+
+                if (is_bg && !(num_stages == 1 && is_builtin(argv0[0]))) {
+                    // background path
+                    execute_background(stages, num_stages);
+                } else {
+                    set_fg_active(1);
+                    int exec_status = 0;
+
+                    if (num_stages == 1) {
+                        int cmd_argc = 0;
+                        while (argv0[cmd_argc] != NULL) cmd_argc++;
+
+                        if(strcmp(argv0[0],"hop") == 0) hop(cmd_argc, argv0, home_directory);
+                        else if(strcmp(argv0[0],"reveal") == 0) reveal_command(argv0, cmd_argc, home_directory);
+                        else if(strcmp(argv0[0], "locate") == 0) locate(argv0, cmd_argc);
+                        else if(strcmp(argv0[0],"peek") == 0) peek_command(cmd_argc, argv0);
+                        else exec_status = execute_with_redirection(argv0, stage_input_files[0],stage_input_count[0], stage_output_files[0],stage_append_flags[0], stage_output_count[0]);
+                    } else {
+                        exec_status = execute_pipeline(stages, num_stages);
+                    }
+
+                    set_fg_active(0);
+                    flush_pending_bg_messages();
+
+                    if (exec_status < 0) break; //stop the rest of the sequence
+                }
+            }
+
+            if (cur != NULL && (cur->type == TOK_SEMI || cur->type == TOK_AMP)) {
+                seg_start = cur->next;
+            } else {
+                seg_start = NULL;
+            }
         }
 
         tokenlist_free(&tokens);
     }
+
     return 0;
 }
