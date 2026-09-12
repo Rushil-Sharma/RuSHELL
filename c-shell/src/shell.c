@@ -185,7 +185,7 @@ int main(){
                 }
 
                 char **argv0 = stage_argv[0];
-                fprintf(stderr, "DEBUG: is_bg=%d num_stages=%d argv0=%s\n", is_bg, num_stages, argv0[0]);
+                // fprintf(stderr, "DEBUG: is_bg=%d num_stages=%d argv0=%s\n", is_bg, num_stages, argv0[0]);
                 if (is_bg && !(num_stages == 1 && is_builtin(argv0[0]))) {
                     // background path
                     execute_background(stages, num_stages);
