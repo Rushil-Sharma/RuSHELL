@@ -18,7 +18,7 @@
 #define MAX_ARGS 100
 
 static int is_builtin(const char *name) {
-    if(strcmp(name,"hop") == 0 || strcmp(name,"reveal") == 0 || strcmp(name,"locate") == 0 || strcmp(name,"peek") == 0) return 1;
+    if(strcmp(name,"hop") == 0 || strcmp(name,"reveal") == 0 || strcmp(name,"locate") == 0 || strcmp(name,"peek") == 0 || strcmp(name,"activities") == 0) return 1;
     return 0;
 }
 
@@ -185,7 +185,7 @@ int main(){
                 }
 
                 char **argv0 = stage_argv[0];
-
+                fprintf(stderr, "DEBUG: is_bg=%d num_stages=%d argv0=%s\n", is_bg, num_stages, argv0[0]);
                 if (is_bg && !(num_stages == 1 && is_builtin(argv0[0]))) {
                     // background path
                     execute_background(stages, num_stages);
@@ -201,6 +201,7 @@ int main(){
                         else if(strcmp(argv0[0],"reveal") == 0) reveal_command(argv0, cmd_argc, home_directory);
                         else if(strcmp(argv0[0], "locate") == 0) locate(argv0, cmd_argc);
                         else if(strcmp(argv0[0],"peek") == 0) peek_command(cmd_argc, argv0);
+                        else if(strcmp(argv0[0], "activities") == 0) activities_print();
                         else exec_status = execute_with_redirection(argv0, stage_input_files[0],stage_input_count[0], stage_output_files[0],stage_append_flags[0], stage_output_count[0]);
                     } else {
                         exec_status = execute_pipeline(stages, num_stages);

@@ -208,8 +208,18 @@ int execute_with_redirection(char **args,char **input_files, int input_count,cha
         }
     }
 
+    // E1: block SIGCHLD across fork()+group_add()/group_add_member() so the
+    // shell's own bookkeeping is always consistent before the process could
+    // possibly be reaped
+    sigset_t block, prev;
+    sigemptyset(&block);
+    sigaddset(&block, SIGCHLD);
+    sigprocmask(SIG_BLOCK, &block, &prev);
+
     int pid = fork();
     if (pid == 0) {
+        sigprocmask(SIG_SETMASK, &prev, NULL);
+        setpgid(0, 0); // E1: standalone command = its own process group, leader is itself
         if (in_fd != -1) {
             dup2(in_fd, STDIN_FILENO);
             close(in_fd);
@@ -222,9 +232,14 @@ int execute_with_redirection(char **args,char **input_files, int input_count,cha
         perror("execv");
         exit(127); // convention for command not found
     } else if (pid > 0) {
+        setpgid(pid, pid); // E1: also set from parent side, race-free either way
+        group_add(pid);              // E1: register the group (job) for activities
+        group_add_member(pid, pid, args[0]); // E1: register the single member
+
         int status;
         if (in_fd != -1) close(in_fd);
         if (out_fd != -1) close(out_fd);
+        sigprocmask(SIG_SETMASK, &prev, NULL);
         waitpid(pid, &status, 0);
         // reap only the specific helper processes we spawned for this command
         if (writer_pid > 0) waitpid(writer_pid, NULL, 0);
@@ -234,6 +249,7 @@ int execute_with_redirection(char **args,char **input_files, int input_count,cha
         return 0;  
     } else {
         perror("fork");
+        sigprocmask(SIG_SETMASK, &prev, NULL);
         if (in_fd != -1) close(in_fd);
         if (out_fd != -1) close(out_fd);
         if (writer_pid > 0) waitpid(writer_pid, NULL, 0);
@@ -318,18 +334,30 @@ int execute_pipeline(command_stage *stages, int num_stages) {
         return -1;
     }
 
+    // E1: block SIGCHLD across all the pipeline forks + group bookkeeping
+    sigset_t block, prev;
+    sigemptyset(&block);
+    sigaddset(&block, SIGCHLD);
+    sigprocmask(SIG_BLOCK, &block, &prev);
+
     // 3. fork one child per stage that resolved successfully
     for (int i = 0; i < num_stages; i++) {
         if (resolved[i] == NULL) continue; // stage failed to resolve, skip it
 
         int pid = fork();
         if (pid == 0) {
+            sigprocmask(SIG_SETMASK, &prev, NULL);
+            setpgid(0, (i == 0) ? 0 : child_pid[0]); // E1: join group led by first stage
+
             // stdin: file redirection > previous pipe > inherited stdin
             if (stages[i].input_count > 0) {
                 dup2(in_fd[i], STDIN_FILENO);
             } else if (i > 0) {
                 dup2(pipefds[i - 1][0], STDIN_FILENO); 
-            }
+            }//else {
+            //     int devnull = open("/dev/null", O_RDONLY);
+            //     if (devnull != -1) { dup2(devnull, STDIN_FILENO); close(devnull); }
+            // }
 
             // stdout: file redirection > next pipe > inherited stdout
             if (stages[i].output_count > 0) {
@@ -348,10 +376,22 @@ int execute_pipeline(command_stage *stages, int num_stages) {
             exit(127);
         } else if (pid > 0) {
             child_pid[i] = pid;
+            setpgid(pid, (i == 0) ? pid : child_pid[0]); // E1: also from parent side, race-free
         } else {
             perror("fork");
         }
     }
+
+    // E1: register the group and every resolved member using the first
+    // stage's pid as the pgid, per spec requirement 8
+    if (child_pid[0] > 0) {
+        group_add(child_pid[0]);
+        for (int i = 0; i < num_stages; i++) {
+            if (child_pid[i] > 0) group_add_member(child_pid[0], child_pid[i], stages[i].args[0]);
+        }
+    }
+    sigprocmask(SIG_SETMASK, &prev, NULL);
+
     close_all_pipes(pipefds, num_pipes);
     for (int i = 0; i < num_stages; i++) {
         if (in_fd[i] != -1) close(in_fd[i]);
@@ -407,6 +447,7 @@ static int execute_with_redirection_bg(char **args, char **input_files, int inpu
     int pid = fork();
     if (pid == 0) {
         sigprocmask(SIG_SETMASK, &prev, NULL); // restore mask for the exec'd program
+        setpgid(0, 0); // standalone background command = its own process group
         if (in_fd != -1) {
             dup2(in_fd, STDIN_FILENO);
             close(in_fd);
@@ -422,6 +463,7 @@ static int execute_with_redirection_bg(char **args, char **input_files, int inpu
         perror("execv");
         exit(127);
     } else if (pid > 0) {
+        setpgid(pid, pid); // E1: also from parent side, race-free either way
         if (in_fd != -1) close(in_fd);
         if (out_fd != -1) close(out_fd);
         *out_pid = pid;
@@ -449,6 +491,8 @@ int execute_background(command_stage *stages, int num_stages) {
         int rc = execute_with_redirection_bg(stages[0].args, stages[0].input_files, stages[0].input_count,stages[0].output_files, stages[0].append_flags, stages[0].output_count,&pid);
         if (rc < 0) return -1;
         int job_id = job_add(pid, stages[0].args[0]);
+        group_add(pid);                       // E1: register group (pgid == pid, group leader)
+        group_add_member(pid, pid, stages[0].args[0]); // E1: register the single member
         printf("[%d] %d\n", job_id, (int)pid);
         fflush(stdout);
         return 0;
@@ -519,6 +563,7 @@ int execute_background(command_stage *stages, int num_stages) {
         int pid = fork();
         if (pid == 0) {
             sigprocmask(SIG_SETMASK, &prev, NULL);
+            setpgid(0, (i == 0) ? 0 : child_pid[0]); // E1: join group led by first stage
 
             if (stages[i].input_count > 0) {
                 dup2(in_fd[i], STDIN_FILENO);
@@ -544,6 +589,7 @@ int execute_background(command_stage *stages, int num_stages) {
             exit(127);
         } else if (pid > 0) {
             child_pid[i] = pid;
+            setpgid(pid, (i == 0) ? pid : child_pid[0]); // E1: also from parent side, race-free
         } else {
             perror("fork");
         }
@@ -558,6 +604,10 @@ int execute_background(command_stage *stages, int num_stages) {
     int rc = 0;
     if (child_pid[0] > 0) {
         int job_id = job_add(child_pid[0], stages[0].args[0]);
+        group_add(child_pid[0]); // E1: register group, pgid == first stage's pid
+        for (int i = 0; i < num_stages; i++) {
+            if (child_pid[i] > 0) group_add_member(child_pid[0], child_pid[i], stages[i].args[0]); // E1
+        }
         printf("[%d] %d\n", job_id, (int)child_pid[0]);
         fflush(stdout);
     } else {
