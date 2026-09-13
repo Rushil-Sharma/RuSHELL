@@ -4,6 +4,8 @@
 #include <signal.h>
 #include <errno.h>
 #include <sys/wait.h>
+#include <sys/ioctl.h>
+#include <termios.h>
 
 #include "jobs.h"
 
@@ -23,6 +25,7 @@ typedef struct {
     pid_t pgid;
     int job_id;
     int active; // group has at least one running member
+    int stopped;
 } proc_group;
 
 typedef struct {
@@ -45,6 +48,7 @@ static volatile sig_atomic_t proc_count = 0;
 
 static volatile sig_atomic_t fg_active = 0;
 static volatile sig_atomic_t at_prompt = 0;
+static pid_t shell_pgid;
 
 static char pending_msgs[MAX_PENDING][MSG_LEN];
 static volatile sig_atomic_t pending_count = 0;
@@ -150,6 +154,7 @@ void group_add(pid_t pgid){
         groups[group_count].pgid = pgid;
         groups[group_count].job_id = next_job_number;
         groups[group_count].active = 1;
+        groups[group_count].stopped = 0;
         group_count++;
     }
     sigprocmask(SIG_SETMASK, &prev, NULL);
@@ -226,11 +231,79 @@ void activities_print(void){
             if (st == 0) { procs[i].active = 0; continue; } // exited, drop it
 
             const char *state_str = "Running";
-            if (st == 'T') state_str = "Stopped";
+            if (st == 'T' || groups[g].stopped) state_str = "Stopped";
 
             printf("  %d %s %s\n", (int)procs[i].pid, procs[i].cmd_name, state_str);
         }
     }
 
+    sigprocmask(SIG_SETMASK, &prev, NULL);
+}
+
+static void sigint_handler(int sig) { 
+    (void)sig;
+    write(STDOUT_FILENO, "\n", 1);
+}
+static void sigtstp_handler(int sig) { (void)sig; }
+
+void terminal_init(void) {
+    shell_pgid = getpid();
+    setpgid(shell_pgid, shell_pgid);
+    tcsetpgrp(STDIN_FILENO, shell_pgid);
+
+    struct sigaction sa_int, sa_tstp;
+
+    sa_int.sa_handler = sigint_handler;
+    sigemptyset(&sa_int.sa_mask);
+    sa_int.sa_flags = 0;
+    sigaction(SIGINT, &sa_int, NULL);
+
+    sa_tstp.sa_handler = sigtstp_handler;
+    sigemptyset(&sa_tstp.sa_mask);
+    sa_tstp.sa_flags = SA_RESTART;
+    sigaction(SIGTSTP, &sa_tstp, NULL);
+
+    signal(SIGTTOU, SIG_IGN);
+}
+
+void give_terminal_to(pid_t pgid) {
+    tcsetpgrp(STDIN_FILENO, pgid);
+}
+
+void reclaim_terminal(void) {
+    tcsetpgrp(STDIN_FILENO, shell_pgid);
+}
+
+int mark_group_stopped(pid_t pgid) {
+    sigset_t prev = block_sigchld();
+    int job_id = -1;
+    for (int g = 0; g < group_count; g++) {
+        if (groups[g].pgid == pgid && groups[g].active) {
+            groups[g].stopped = 1;
+            job_id = groups[g].job_id;
+            break;
+        }
+    }
+    sigprocmask(SIG_SETMASK, &prev, NULL);
+    return job_id;
+}
+
+int has_stopped_jobs(void) {
+    sigset_t prev = block_sigchld();
+    int found = 0;
+    for (int g = 0; g < group_count; g++) {
+        if (groups[g].active && groups[g].stopped) { found = 1; break; }
+    }
+    sigprocmask(SIG_SETMASK, &prev, NULL);
+    return found;
+}
+
+void hangup_all_jobs(void) {
+    sigset_t prev = block_sigchld();
+    for (int g = 0; g < group_count; g++) {
+        if (groups[g].active) {
+            kill(-groups[g].pgid, SIGHUP);
+        }
+    }
     sigprocmask(SIG_SETMASK, &prev, NULL);
 }

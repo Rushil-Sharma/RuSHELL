@@ -14,4 +14,11 @@ void group_add(pid_t pgid);
 void group_add_member(pid_t pgid, pid_t pid, const char *cmd_name);
 void activities_print(void);
 
+void terminal_init(void); // save shell pgid, take terminal, ignore/handle signals
+void give_terminal_to(pid_t pgid); // tcsetpgrp to job
+void reclaim_terminal(void); // tcsetpgrp back to shell
+int  mark_group_stopped(pid_t pgid); // find group by pgid, mark Stopped, return job_id (-1 if not found)
+int  has_stopped_jobs(void); // 1 if any tracked group is currently Stopped
+void hangup_all_jobs(void); // SIGHUP every tracked group's pgid, no waiting
+
 #endif

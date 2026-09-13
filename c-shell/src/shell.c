@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <string.h>
 
 #include "prompt.h"
@@ -21,6 +22,7 @@ static int is_builtin(const char *name) {
     if(strcmp(name,"hop") == 0 || strcmp(name,"reveal") == 0 || strcmp(name,"locate") == 0 || strcmp(name,"peek") == 0 || strcmp(name,"activities") == 0) return 1;
     return 0;
 }
+static int prev_ctrld = 0;
 
 int main(){
     // Print the welcome text
@@ -44,7 +46,8 @@ int main(){
     FILE *file_ptr2 = fopen("./prev_dir.txt", "w");
     fclose(file_ptr2);
     
-    jobs_init(); // initializing SIGCHLD handler for background jobs 
+    jobs_init(); // initializing SIGCHLD handler for background jobs
+    terminal_init();
     while(1){
     //Definations
         char *prompt = NULL;
@@ -57,11 +60,22 @@ int main(){
 
         //Take command
         if(fgets(command, STRING_SIZE, stdin) == NULL){
-            set_at_prompt(0); // shell is no longer at prompt
+            if (errno == EINTR) {
+                clearerr(stdin);
+                continue;
+            }
+            set_at_prompt(0);
+            if (has_stopped_jobs() && !prev_ctrld) {
+                printf("\ncshell: there are stopped jobs\n");
+                prev_ctrld = 1;
+                clearerr(stdin);
+                continue;
+            }
+            hangup_all_jobs();
             printf("\n");
             break;
         }
-        set_at_prompt(0);
+        prev_ctrld = 0;
         int scan_val = strlen(command);
         if(scan_val == -1){
             printf("\n");
@@ -71,6 +85,7 @@ int main(){
             command[scan_val - 1] = '\0'; // removes \n puts \0
         }
         if(strcmp(command,"exit()") == 0){
+            hangup_all_jobs();
             printf("Bye bye ...\n");
             return 0;
         }
