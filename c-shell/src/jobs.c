@@ -307,3 +307,52 @@ void hangup_all_jobs(void) {
     }
     sigprocmask(SIG_SETMASK, &prev, NULL);
 }
+
+int group_lookup(int job_id, pid_t *pgid, int *stopped, char *cmd_name, size_t cmd_name_len) {
+    sigset_t prev = block_sigchld();
+    int found = 0;
+    for (int g = 0; g < group_count; g++) {
+        if (groups[g].active && groups[g].job_id == job_id) {
+            *pgid = groups[g].pgid;
+            *stopped = groups[g].stopped;
+            found = 1;
+            // grab the leader's (first-registered member's) cmd_name for printing
+            cmd_name[0] = '\0';
+            for (int i = 0; i < proc_count; i++) {
+                if (procs[i].pgid == groups[g].pgid) {
+                    strncpy(cmd_name, procs[i].cmd_name, cmd_name_len - 1);
+                    cmd_name[cmd_name_len - 1] = '\0';
+                    break;
+                }
+            }
+            break;
+        }
+    }
+    sigprocmask(SIG_SETMASK, &prev, NULL);
+    return found;
+}
+
+void mark_group_running(pid_t pgid) {
+    sigset_t prev = block_sigchld();
+    for (int g = 0; g < group_count; g++) {
+        if (groups[g].pgid == pgid && groups[g].active) {
+            groups[g].stopped = 0;
+            break;
+        }
+    }
+    sigprocmask(SIG_SETMASK, &prev, NULL);
+}
+
+void group_remove(pid_t pgid) {
+    sigset_t prev = block_sigchld();
+    for (int g = 0; g < group_count; g++) {
+        if (groups[g].pgid == pgid && groups[g].active) {
+            groups[g].active = 0;
+            break;
+        }
+    }
+    for (int i = 0; i < proc_count; i++) {
+        if (procs[i].pgid == pgid) procs[i].active = 0;
+    }
+    sigprocmask(SIG_SETMASK, &prev, NULL);
+}

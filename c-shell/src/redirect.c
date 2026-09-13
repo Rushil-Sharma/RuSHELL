@@ -20,6 +20,15 @@ static int is_exec(const char *path) {
     return 1;
 }
 
+// joins argv into a single "cmd arg1 arg2 ..." string for job display names
+static void join_args(char **args, char *out, size_t outsize) {
+    out[0] = '\0';
+    for (int i = 0; args[i] != NULL; i++) {
+        if (i > 0) strncat(out, " ", outsize - strlen(out) - 1);
+        strncat(out, args[i], outsize - strlen(out) - 1);
+    }
+}
+
 // generates a full path out of the given command
 static char *resolve_command(const char *cmd) {
     char full_path[2048];
@@ -233,8 +242,10 @@ int execute_with_redirection(char **args,char **input_files, int input_count,cha
         exit(127); // convention for command not found
     } else if (pid > 0) {
         setpgid(pid, pid); //also set from parent side, race-free either way
+        char cmdline[256];
+        join_args(args, cmdline, sizeof(cmdline));
         group_add(pid);              //register the group (job) for activities
-        group_add_member(pid, pid, args[0]); //register the single member
+        group_add_member(pid, pid, cmdline); //register the single member
         give_terminal_to(pid);
 
         int status;
@@ -251,7 +262,7 @@ int execute_with_redirection(char **args,char **input_files, int input_count,cha
 
         if (WIFSTOPPED(status)) {
             int jid = mark_group_stopped(pid);
-            printf("[%d] + Stopped\t%s\n", jid, args[0]);
+            printf("[%d] + Stopped\t%s\n", jid, cmdline);
             return 0;
         }
         if (WIFEXITED(status) && WEXITSTATUS(status) == 127) return -1;
@@ -394,7 +405,11 @@ int execute_pipeline(command_stage *stages, int num_stages) {
     if (child_pid[0] > 0) {
         group_add(child_pid[0]);
         for (int i = 0; i < num_stages; i++) {
-            if (child_pid[i] > 0) group_add_member(child_pid[0], child_pid[i], stages[i].args[0]);
+            if (child_pid[i] > 0) {
+                char cmdline[256];
+                join_args(stages[i].args, cmdline, sizeof(cmdline));
+                group_add_member(child_pid[0], child_pid[i], cmdline);
+            }
         }
     }
     sigprocmask(SIG_SETMASK, &prev, NULL);
@@ -425,7 +440,9 @@ int execute_pipeline(command_stage *stages, int num_stages) {
 
     if (WIFSTOPPED(leader_status)) {
         int jid = mark_group_stopped(child_pid[0]);
-        printf("[%d] + Stopped\t%s\n", jid, stages[0].args[0]);
+        char cmdline0[256];
+        join_args(stages[0].args, cmdline0, sizeof(cmdline0));
+        printf("[%d] + Stopped\t%s\n", jid, cmdline0);
         return 0;
     }
     return any_resolve_failed ? -1 : 0;
@@ -512,9 +529,11 @@ int execute_background(command_stage *stages, int num_stages) {
         pid_t pid;
         int rc = execute_with_redirection_bg(stages[0].args, stages[0].input_files, stages[0].input_count,stages[0].output_files, stages[0].append_flags, stages[0].output_count,&pid);
         if (rc < 0) return -1;
-        int job_id = job_add(pid, stages[0].args[0]);
-        group_add(pid);                       // register group (pgid == pid, group leader)
-        group_add_member(pid, pid, stages[0].args[0]); // register the single member
+        char cmdline[256];
+        join_args(stages[0].args, cmdline, sizeof(cmdline));
+        int job_id = job_add(pid, cmdline);
+        group_add(pid); // register group (pgid == pid, group leader)
+        group_add_member(pid, pid, cmdline); // register the single member
         printf("[%d] %d\n", job_id, (int)pid);
         fflush(stdout);
         return 0;
@@ -625,10 +644,16 @@ int execute_background(command_stage *stages, int num_stages) {
 
     int rc = 0;
     if (child_pid[0] > 0) {
-        int job_id = job_add(child_pid[0], stages[0].args[0]);
-        group_add(child_pid[0]); // register group, pgid == first stage's pid
+        char cmdline0[256];
+        join_args(stages[0].args, cmdline0, sizeof(cmdline0));
+        int job_id = job_add(child_pid[0], cmdline0);
+        group_add(child_pid[0]);
         for (int i = 0; i < num_stages; i++) {
-            if (child_pid[i] > 0) group_add_member(child_pid[0], child_pid[i], stages[i].args[0]); // E1
+            if (child_pid[i] > 0) {
+                char cmdline[256];
+                join_args(stages[i].args, cmdline, sizeof(cmdline));
+                group_add_member(child_pid[0], child_pid[i], cmdline); // E1
+            }
         }
         printf("[%d] %d\n", job_id, (int)child_pid[0]);
         fflush(stdout);

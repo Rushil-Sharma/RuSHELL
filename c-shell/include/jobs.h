@@ -21,4 +21,8 @@ int  mark_group_stopped(pid_t pgid); // find group by pgid, mark Stopped, return
 int  has_stopped_jobs(void); // 1 if any tracked group is currently Stopped
 void hangup_all_jobs(void); // SIGHUP every tracked group's pgid, no waiting
 
+int group_lookup(int job_id, pid_t *pgid, int *stopped, char *cmd_name, size_t cmd_name_len);
+void mark_group_running(pid_t pgid);
+void group_remove(pid_t pgid);
+
 #endif

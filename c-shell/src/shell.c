@@ -13,13 +13,14 @@
 #include "redirect.h"
 #include "peek.h"
 #include "jobs.h"
+#include "resume.h"
 
 #define STRING_SIZE 4096
 #define MAX_STAGES 64
 #define MAX_ARGS 100
 
 static int is_builtin(const char *name) {
-    if(strcmp(name,"hop") == 0 || strcmp(name,"reveal") == 0 || strcmp(name,"locate") == 0 || strcmp(name,"peek") == 0 || strcmp(name,"activities") == 0) return 1;
+    if(strcmp(name,"hop") == 0 || strcmp(name,"reveal") == 0 || strcmp(name,"locate") == 0 || strcmp(name,"peek") == 0 || strcmp(name,"activities") == 0 || strcmp(name,"resume") == 0) return 1;
     return 0;
 }
 static int prev_ctrld = 0;
@@ -217,6 +218,7 @@ int main(){
                         else if(strcmp(argv0[0], "locate") == 0) locate(argv0, cmd_argc);
                         else if(strcmp(argv0[0],"peek") == 0) peek_command(cmd_argc, argv0);
                         else if(strcmp(argv0[0], "activities") == 0) activities_print();
+                        else if(strcmp(argv0[0],"resume") == 0) resume_command(argv0,cmd_argc);
                         else exec_status = execute_with_redirection(argv0, stage_input_files[0],stage_input_count[0], stage_output_files[0],stage_append_flags[0], stage_output_count[0]);
                     } else {
                         exec_status = execute_pipeline(stages, num_stages);
