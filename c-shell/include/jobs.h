@@ -25,4 +25,6 @@ int group_lookup(int job_id, pid_t *pgid, int *stopped, char *cmd_name, size_t c
 void mark_group_running(pid_t pgid);
 void group_remove(pid_t pgid);
 
+int pid_is_tracked(pid_t pid);// Returns 1 if pid belongs to a process this shell spawned and is still tracking (i.e. still active in the internal proc table), else 0.
+
 #endif

@@ -356,3 +356,13 @@ void group_remove(pid_t pgid) {
     }
     sigprocmask(SIG_SETMASK, &prev, NULL);
 }
+
+int pid_is_tracked(pid_t pid) {
+    sigset_t prev = block_sigchld();
+    int found = 0;
+    for (int i = 0; i < proc_count; i++) {
+        if (procs[i].pid == pid && procs[i].active) { found = 1; break; }
+    }
+    sigprocmask(SIG_SETMASK, &prev, NULL);
+    return found;
+}

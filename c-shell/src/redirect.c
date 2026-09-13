@@ -490,9 +490,6 @@ static int execute_with_redirection_bg(char **args, char **input_files, int inpu
         if (in_fd != -1) {
             dup2(in_fd, STDIN_FILENO);
             close(in_fd);
-        } else {
-            int devnull = open("/dev/null", O_RDONLY);
-            if (devnull != -1) { dup2(devnull, STDIN_FILENO); close(devnull); }
         }
         if (out_fd != -1) {
             dup2(out_fd, STDOUT_FILENO);
@@ -610,10 +607,10 @@ int execute_background(command_stage *stages, int num_stages) {
                 dup2(in_fd[i], STDIN_FILENO);
             } else if (i > 0) {
                 dup2(pipefds[i - 1][0], STDIN_FILENO);
-            } else {
-                int devnull = open("/dev/null", O_RDONLY);
-                if (devnull != -1) { dup2(devnull, STDIN_FILENO); close(devnull); }
-            }
+            } //else {
+            //     int devnull = open("/dev/null", O_RDONLY);
+            //     if (devnull != -1) { dup2(devnull, STDIN_FILENO); close(devnull); }
+            // }
 
             if (stages[i].output_count > 0) {
                 dup2(out_fd[i], STDOUT_FILENO);
