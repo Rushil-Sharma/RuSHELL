@@ -9,7 +9,7 @@ cpu_work(int iterations)
 {
   volatile int count = 0;
   for (int i = 0; i < iterations; i++) {
-    for (int j = 0; j < 5000000; j++) {
+    for (int j = 0; j < 20000000; j++) {
       count++;
     }
   }
