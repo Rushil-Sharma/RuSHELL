@@ -37,6 +37,17 @@ sys_wait(void)
 }
 
 uint64
+sys_waitx(void)
+{
+  uint64 status, wtime, rtime, resp;
+  argaddr(0, &status);
+  argaddr(1, &wtime);
+  argaddr(2, &rtime);
+  argaddr(3, &resp);
+  return kwaitx(status, wtime, rtime, resp);
+}
+
+uint64
 sys_sbrk(void)
 {
   uint64 addr;

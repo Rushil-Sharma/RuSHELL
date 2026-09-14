@@ -88,6 +88,20 @@ ifneq ($(shell $(CC) -dumpspecs 2>/dev/null | grep -e '[^f]nopie'),)
 CFLAGS += -fno-pie -nopie
 endif
 
+ifndef SCHEDULER
+SCHEDULER := RR
+endif
+
+ifeq ($(SCHEDULER), MLFQ)
+CFLAGS += -DSCHED_MLFQ
+else ifeq ($(SCHEDULER), FIFO)
+CFLAGS += -DSCHED_FIFO
+else ifeq ($(SCHEDULER), FCFS)
+CFLAGS += -DSCHED_FIFO
+else
+CFLAGS += -DSCHED_RR
+endif
+
 LDFLAGS = -z max-page-size=4096
 
 $K/kernel: $(OBJS) $K/kernel.ld
@@ -150,7 +164,11 @@ UPROGS=\
 	$U/_forphan\
 	$U/_dorphan\
 	$U/_sync\
+	$U/_testmlfq\
 	$U/_testfcfs\
+	$U/_schedulertest\
+	$U/_schedmixed\
+	$U/_schedtest\
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)

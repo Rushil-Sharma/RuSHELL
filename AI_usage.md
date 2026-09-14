@@ -970,3 +970,358 @@ clean:
 Removes the build/ directory and the compiled binary entirely — rm -rf $(BUILD_DIR) $(TARGET) — so you can start a fresh build with make clean && make.
 
 With this in place, make alone builds shell.out, and adding a new file to src/+include/ (like a future background.c) requires zero Makefile edits — $(wildcard ...) picks it up automatically.
+
+## Now i need to extend my code so that piping functions work look at this task {DEF}. Give me a detailed chain of events that will help me do this 
+This roadmap provides C function skeletons and TODOs to build sequential/background execution, job control, terminal management, and diagnostic utilities.
+
+## Architecture & State Management
+
+Create `job_control.h` to maintain running and stopped process groups across all features.
+
+```c
+#include <sys/types.h>
+#include <termios.h>
+
+#define MAX_JOBS 256
+#define MAX_CMD_LEN 1024
+
+typedef enum {
+    JOB_RUNNING,
+    JOB_STOPPED
+} JobState;
+
+typedef struct ProcessNode {
+    pid_t pid;
+    char command[256];
+    JobState state;
+    struct ProcessNode *next;
+} ProcessNode;
+
+typedef struct JobNode {
+    int job_number;           // Monotonically increasing ID
+    pid_t pgid;               // Process group ID
+    char command_line[MAX_CMD_LEN];
+    ProcessNode *processes;    // Head of process list
+    int is_background;        // 1 if backgrounded, 0 if foreground
+    JobState state;           // Overall group state
+    struct JobNode *next;
+} JobNode;
+
+// Global shell state structures
+extern JobNode *job_list_head;
+extern int next_job_number;
+extern pid_t shell_pgid;
+extern struct termios shell_tmodes;
+
+```
+
+---
+
+## Part D: Sequential and Background Execution
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <signal.h>
+#include <string.h>
+#include "job_control.h"
+
+// ---- D1: Sequential Execution ----
+
+int execute_sequential(char **command_sequence, int num_commands) {
+    // TODO: Loop through each command in command_sequence from index 0 to num_commands - 1
+    // TODO: For each command, parse it into an executable shell_cmd structure
+    // TODO: Attempt to launch/execute the command in the foreground
+    // TODO: If the shell fails to start the command (e.g., executable not found):
+    //       - Print: "cshell: command not found (<commandname>)"
+    //       - Stop execution immediately and return -1 without running remaining commands
+    // TODO: If the command starts, wait for it to finish (waitpid)
+    // TODO: Check child exit code: non-zero return code is NOT a failure to start; continue sequence
+    // TODO: Display shell prompt after all commands finish or after a failure to start occurs
+    // TODO: Return 0 on complete sequence execution
+}
+
+// ---- D2: Background Execution & Signal Handler ----
+
+static void sigchld_handler(int sig) {
+    // TODO: Preserve errno at entry and restore before returning
+    // TODO: Loop waitpid(-1, &status, WNOHANG | WUNTRACED | WCONTINUED) to harvest exited child PIDs
+    // TODO: Find the job corresponding to the reaped PID in job_list_head
+    // TODO: If process exited normally (WIFEXITED):
+    //       - Defer or queue print if a foreground process is currently running
+    //       - Print: "<command_name> with pid <pid> exited normally"
+    // TODO: If process was terminated by a signal (WIFSIGNALED):
+    //       - Print: "<command_name> with pid <pid> exited abnormally"
+    // TODO: Update process and job states; remove process/job from list if all processes in group exited
+}
+
+void setup_background_signals(void) {
+    // TODO: Configure sigaction for SIGCHLD with SA_RESTART | SA_NOCLDSTOP
+    // TODO: Bind sigchld_handler as the handler
+}
+
+int execute_background_job(char *cmd_line, char **argv) {
+    // TODO: Assign a new job number from next_job_number (increment monotonically)
+    // TODO: fork() a child process
+    // TODO: In Child:
+    //       - Set process group ID using setpgid(0, 0)
+    //       - Redirect stdin from /dev/null so background process cannot read terminal input
+    //       - Execve the command; if execve fails, print command not found and exit(127)
+    // TODO: In Parent:
+    //       - Call setpgid(child_pid, child_pid) to prevent race condition with child
+    //       - Add process and job entry to global job_list_head
+    //       - Print job creation line BEFORE any output from command:
+    //         "[job_number] process_id" (Use PID of first command if pipeline)
+    //       - Return immediately to allow prompt rendering without blocking
+}
+
+```
+
+---
+
+## Part E: Exotic Shell Intrinsics
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <signal.h>
+#include <termios.h>
+#include <sys/wait.h>
+#include "job_control.h"
+
+// ---- E1: activities ----
+
+void builtin_activities(void) {
+    // TODO: Clean up any reaped/dead processes from job_list_head before listing
+    // TODO: Iterate over job_list_head (ordered by job creation time, oldest first)
+    // TODO: For each job group, print:
+    //       "[job_number] pgid <pgid_value>"
+    // TODO: Iterate over each process in the job's process list and print (indented 2 spaces):
+    //       "  <pid> <command_name> <state>" (state: "Running" or "Stopped")
+    // TODO: For pipelines, report the PID of the first process in the job list
+}
+
+// ---- E2: Terminal Control ----
+
+void init_terminal_control(void) {
+    // TODO: Loop until shell is in foreground (tcgetpgrp(STDIN_FILENO) == shell_pgid)
+    // TODO: Set shell process group: setpgid(0, getpid())
+    // TODO: Take terminal control: tcsetpgrp(STDIN_FILENO, shell_pgid)
+    // TODO: Ignore SIGTTOU, SIGTTIN, SIGTSTP, SIGINT using signal() or sigaction()
+    // TODO: Save shell default terminal attributes in shell_tmodes (tcgetattr)
+}
+
+void give_terminal_to(pid_t pgid) {
+    // TODO: Set terminal foreground process group: tcsetpgrp(STDIN_FILENO, pgid)
+}
+
+void reclaim_terminal(void) {
+    // TODO: Restore shell process group: tcsetpgrp(STDIN_FILENO, shell_pgid)
+    // TODO: Restore terminal attributes: tcsetattr(STDIN_FILENO, TCSADRAIN, &shell_tmodes)
+}
+
+void handle_ctrl_d(char *input_buffer, int buffer_len, int *consecutive_eof_flag) {
+    // TODO: If buffer_len > 0 (text on input line): keep typed text, keep shell alive
+    // TODO: If buffer_len == 0 (empty line / EOF):
+    //       - Check if any job in job_list_head has state == JOB_STOPPED
+    //       - If stopped jobs exist and *consecutive_eof_flag == 0:
+    //         Print "cshell: there are stopped jobs", set *consecutive_eof_flag = 1, do NOT exit
+    //       - If stopped jobs exist and *consecutive_eof_flag == 1 (pressed twice sequentially): exit shell
+    //       - If no stopped jobs exist: exit shell immediately
+    // TODO: Before exiting, send SIGHUP to all job process groups (kill(-pgid, SIGHUP)) without waiting
+}
+
+// ---- E3: resume ----
+
+static void alarm_handler(int sig) {
+    // TODO: Marker/flag set when timeout elapses during fg execution
+}
+
+int builtin_resume(int argc, char **argv) {
+    // TODO: Validate syntax:
+    //       - Expected: resume %job_number (fg [--timeout <seconds>] | bg)
+    //       - If invalid argument format/missing numbers: print "resume: invalid syntax", return -1
+    // TODO: Parse job_number, verify mode ("fg" vs "bg"), check for optional "--timeout <seconds>"
+    // TODO: Search job_list_head for job_number; if not found: print "resume: no such job", return -1
+    // TODO: Send SIGCONT signal to job process group: kill(-job->pgid, SIGCONT)
+    // TODO: If mode is "bg":
+    //       - Update job/process state to JOB_RUNNING
+    //       - Print: "[job_number] + Running <command_line>"
+    //       - Return immediately without modifying terminal ownership
+    // TODO: If mode is "fg":
+    //       - Print job command line: "<command_line>"
+    //       - Give terminal to process group: tcsetpgrp(STDIN_FILENO, job->pgid)
+    //       - Update job state to JOB_RUNNING
+    //       - If --timeout specified:
+    //         Set sigaction for SIGALRM to alarm_handler and trigger alarm(seconds)
+    //       - Wait for job using waitpid(-job->pgid, &status, WUNTRACED)
+    //       - If SIGALRM fired before job completed:
+    //         1. Send SIGTERM to job: kill(-job->pgid, SIGTERM)
+    //         2. Print: "resume: job timed out"
+    //         3. Remove job from tracked list
+    //       - If job completed or stopped normally: cancel pending timer via alarm(0)
+    //       - Reclaim terminal for shell: reclaim_terminal()
+}
+
+// ---- E4: ping ----
+
+int builtin_ping(int argc, char **argv) {
+    // TODO: Validate argument count (argc == 3)
+    // TODO: Parse signal_number from argv[2]:
+    //       - Validate signal_number is a valid non-negative integer (no negative sign or chars)
+    //       - If invalid: print "ping: invalid syntax", return -1
+    // TODO: Calculate target signal: real_sig = signal_number % 64
+    // TODO: Parse target string from argv[1]:
+    //       - If starts with '%': job target -> look up job_number in job_list_head
+    //       - Otherwise: PID target -> check if PID exists in any process in job_list_head
+    // TODO: If target job or PID is not tracked by the shell:
+    //       - Print: "ping: no such process found", return -1
+    // TODO: Send signal:
+    //       - For job target: kill(-pgid, real_sig)
+    //       - For PID target: kill(pid, real_sig)
+    // TODO: Print success message using original typed signal_number:
+    //       "Sent signal <signal_number> to <target>"
+}
+
+```
+
+---
+
+## Part F: Diagnostic & Tracing Utilities
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <sys/ptrace.h>
+#include <sys/user.h>
+#include <sys/wait.h>
+#include <time.h>
+
+// ---- F1: spy ----
+
+void builtin_spy(int argc, char **argv) {
+    // TODO: Parse argument count:
+    //       - If argc > 2: print "spy: invalid syntax", return
+    //       - If argc == 1: target PID = getpid() (current shell)
+    //       - If argc == 2: target PID = atoi(argv[1])
+    // TODO: Verify /proc/<target_pid> exists using stat() or access()
+    //       - If non-existent: print "spy: no such process", return
+    // TODO: Print table header: "PID    FD    TYPE   PATH"
+    // TODO: Inspect CWD:
+    //       - Read symlink "/proc/<target_pid>/cwd" via readlink()
+    //       - Print row: "<pid>    cwd    DIR    <cwd_path>"
+    // TODO: Inspect Executable:
+    //       - Read symlink "/proc/<target_pid>/exe" via readlink()
+    //       - Print row: "<pid>    txt    REG    <exe_path>"
+    // TODO: Inspect Memory Mappings:
+    //       - Open "/proc/<target_pid>/maps"
+    //       - Parse file lines, extract mapped file paths (starting with '/')
+    //       - Maintain list of seen paths; print only unique memory-mapped paths with FD = "mem", TYPE = "REG"
+    // TODO: Inspect Open File Descriptors:
+    //       - Open directory "/proc/<target_pid>/fd"
+    //       - Iterate through numeric FD entries (0, 1, 2, ...)
+    //       - Use readlink() on "/proc/<target_pid>/fd/<fd>" to resolve path
+    //       - Stat target path to resolve file type:
+    //         * S_ISREG -> REG, S_ISDIR -> DIR, S_ISCHR -> CHR, S_ISBLK -> BLK, S_ISFIFO -> FIFO, S_ISSOCK -> SOCK
+    //       - Print row: "<pid>    <fd>    <type>   <path>"
+}
+
+// ---- F2: snoop ----
+
+typedef struct {
+    int syscall_num;
+    char name[64];
+    long count;
+    double total_time_sec;
+    long first_seen_order;
+} SyscallStat;
+
+static const char *get_syscall_name(int sys_num) {
+    // TODO: Translate x86_64 syscall number to string name (e.g., 0 -> read, 1 -> write, 35 -> nanosleep)
+    // TODO: If syscall number is not in table, format as "syscall_N" into static buffer
+}
+
+void builtin_snoop(int argc, char **argv) {
+    // TODO: Parse arguments:
+    //       - Mode A (snoop -p <pid>): Attach to running process via ptrace(PTRACE_ATTACH, target_pid)
+    //         * If pid invalid/missing: print "snoop: no such process", return
+    //       - Mode B (snoop <command> [args]): Fork child, call ptrace(PTRACE_TRACEME), execve command
+    //         * If command non-existent: print "snoop: command not found", return
+    // TODO: Trace Loop:
+    //       - Maintain tracking array/hash for syscall metrics (count, time, first_seen)
+    //       - Loop with ptrace(PTRACE_SYSCALL, tracee_pid, 0, 0) + waitpid()
+    //       - Detect syscall entry vs exit (e.g., toggle state bit or check orig_rax/rax)
+    //       - At syscall entry: record start time via clock_gettime(CLOCK_MONOTONIC, &start)
+    //       - At syscall exit: record end time, calculate duration, update count and total_time_sec for sys_num
+    //       - Exit loop when tracee terminates (WIFEXITED or WIFSIGNALED)
+    // TODO: Format & Sort Output:
+    //       - Sort summary array descending by call count
+    //       - Break tie-breakers using first_seen_order
+    //       - Print summary table:
+    //         "syscall       calls   time"
+    //         "<name>     <count>    <time_in_seconds>s"
+}
+
+```
+
+---
+
+## Task Verification & Roadmap Sequence
+
+```
+[Phase 1: Foundation]
+  ├── Implement job_control.h data structures & job tracking list
+  └── Implement D1 (Sequential execution and ';' parsing)
+
+[Phase 2: Process Control]
+  ├── Implement D2 (Forking background processes and SIGCHLD handler)
+  ├── Implement E1 ('activities' command formatting)
+  └── Implement E2 (Terminal control with tcsetpgrp & EOF handling)
+
+[Phase 3: Job Signal Mechanics]
+  ├── Implement E3 ('resume' command with fg, bg, and --timeout)
+  └── Implement E4 ('ping' signal delivery & verification)
+
+[Phase 4: OS Diagnostics]
+  ├── Implement F1 ('spy' procfs reader)
+  └── Implement F2 ('snoop' ptrace syscall analyzer)
+
+```
+To adapt your existing codebase for sequential/background execution, terminal control, job management, and diagnostics, you will need to adjust your parsing rules, signal setup, and execution flow.
+
+Grammar & Parser Adjustments
+
+Handle Trailing Delimiters: Update parse_validate to allow command sequence operators like ; or & right before TOK_EOF. Currently, your parser strictly demands a word after every operator, which will reject valid commands ending in semicolons or background ampersands.
+
+Preserve Job Identifiers in Lexer: Ensure % is not classified as a special symbol in is_special(). Keeping % as a standard word character allows job identifiers like %1 to pass directly into argument vectors for ping and resume.
+
+Transform Tokens into Execution Structures: Extend your parser beyond boolean validation. Build a nested data structure representing single commands, piped chains (pipelines), and semicolon-delimited lists (sequences) so your executor can iterate through them systematically.
+
+Shell Initialization & Terminal Management
+
+Mask Interactive Signals at Startup: Configure your shell at launch to ignore terminal signals like SIGINT (Ctrl-C) and SIGTSTP (Ctrl-Z). This prevents interactive keystrokes from terminating or suspending the main shell process.
+
+Hand Off Terminal Ownership: Before launching foreground commands, transfer terminal foreground process group ownership to the command's process group, and reclaim ownership immediately after the command exits or stops.
+
+Track State for Exit (Ctrl-D): Update your line-reading loop to check the job list when receiving an empty EOF signal. Maintain a state counter so that if stopped jobs exist, the shell warns the user on the first press and only exits (after sending termination signals to all tracked jobs) if pressed a second consecutive time.
+
+Execution & Process Group Handling
+
+Differentiate Launch Failures from Exit Codes (Part D1): In your sequential loop, distinguish between a process that failed to start (e.g., command not found) and one that ran but returned a non-zero exit code. Only a failure to launch should abort remaining commands in a sequence.
+
+Eliminate Race Conditions in Child Forking: Call process group assignment functions in both the parent and child process immediately after fork(). Relying on only one side creates race conditions where commands execute before their group ID is set.
+
+Non-Blocking Reaping (Part D2): Implement a SIGCHLD handler that harvests child process statuses in a non-blocking loop using WNOHANG. Queue or handle notification printing carefully so background completion messages do not collide with active user input or foreground prompts.
+
+Built-In Command Integration
+
+Expand Built-In Dispatching: Add routing for activities, resume, ping, spy, and snoop into your central execution check before passing commands off to execvp.
+
+Synchronize Path State (hop and reveal): Ensure your directory-history tracking file remains the single source of truth for previous directory state so shortcuts like - evaluate identically across both hop and reveal.

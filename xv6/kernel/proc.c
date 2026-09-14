@@ -19,6 +19,7 @@ extern void forkret(void);
 static void freeproc(struct proc *p);
 
 extern char trampoline[]; // trampoline.S
+extern uint ticks;
 
 // helps ensure that wakeups of wait()ing
 // parents are not lost. helps obey the
@@ -146,6 +147,18 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  // Initialize MLFQ and timing metrics
+  p->queue = 0;
+  p->ticks_in_slice = 0;
+  p->enter_time = ticks;
+  p->ctime = ticks;
+  p->ttime = 0;
+  p->rtime = 0;
+  p->wtime = 0;
+  p->stime = 0;
+  p->first_run_time = 0;
+  p->has_run = 0;
+
   return p;
 }
 
@@ -167,6 +180,16 @@ freeproc(struct proc *p)
   p->chan = 0;
   p->killed = 0;
   p->xstate = 0;
+  p->queue = 0;
+  p->ticks_in_slice = 0;
+  p->enter_time = 0;
+  p->ctime = 0;
+  p->ttime = 0;
+  p->rtime = 0;
+  p->wtime = 0;
+  p->stime = 0;
+  p->first_run_time = 0;
+  p->has_run = 0;
   p->state = UNUSED;
 }
 
@@ -354,6 +377,7 @@ kexit(int status)
 
   acquire(&p->lock);
 
+  p->ttime = ticks;
   p->xstate = status;
   p->state = ZOMBIE;
 
@@ -418,6 +442,133 @@ kwait(uint64 addr)
   }
 }
 
+int
+kwaitx(uint64 addr, uint64 wtime_addr, uint64 rtime_addr, uint64 resp_addr)
+{
+  struct proc *pp;
+  int havekids, pid;
+  struct proc *p = myproc();
+
+  acquire(&wait_lock);
+
+  for (;;) {
+    // Scan through table looking for exited children.
+    havekids = 0;
+    for (pp = proc; pp < &proc[NPROC]; pp++) {
+      if (pp->parent == p) {
+        acquire(&pp->lock);
+
+        havekids = 1;
+        if (pp->state == ZOMBIE) {
+          pid = pp->pid;
+          if (addr != 0 &&
+              copyout(p->pagetable, p->sz, addr, (char *)&pp->xstate,
+                      sizeof(pp->xstate)) < 0) {
+            release(&pp->lock);
+            release(&wait_lock);
+            return -1;
+          }
+          if (wtime_addr != 0 &&
+              copyout(p->pagetable, p->sz, wtime_addr, (char *)&pp->wtime,
+                      sizeof(pp->wtime)) < 0) {
+            release(&pp->lock);
+            release(&wait_lock);
+            return -1;
+          }
+          if (rtime_addr != 0 &&
+              copyout(p->pagetable, p->sz, rtime_addr, (char *)&pp->rtime,
+                      sizeof(pp->rtime)) < 0) {
+            release(&pp->lock);
+            release(&wait_lock);
+            return -1;
+          }
+          int resp = 0;
+          if (pp->has_run && pp->first_run_time >= pp->ctime)
+            resp = pp->first_run_time - pp->ctime;
+          if (resp_addr != 0 &&
+              copyout(p->pagetable, p->sz, resp_addr, (char *)&resp,
+                      sizeof(resp)) < 0) {
+            release(&pp->lock);
+            release(&wait_lock);
+            return -1;
+          }
+          pp->parent = 0;
+          freeproc(pp);
+          release(&pp->lock);
+          release(&wait_lock);
+          return pid;
+        }
+        release(&pp->lock);
+      }
+    }
+
+    if (!havekids || killed(p)) {
+      release(&wait_lock);
+      return -1;
+    }
+
+    sleep_prepare(p);
+    release(&wait_lock);
+    sleep();
+    acquire(&wait_lock);
+  }
+}
+
+void
+update_proc_time(void)
+{
+  struct proc *p;
+  for (p = proc; p < &proc[NPROC]; p++) {
+    acquire(&p->lock);
+    if (p->state == RUNNING) {
+      p->rtime++;
+#ifdef SCHED_MLFQ
+      p->ticks_in_slice++;
+#endif
+      if (!p->has_run) {
+        p->has_run = 1;
+        p->first_run_time = ticks;
+      }
+    } else if (p->state == RUNNABLE) {
+      p->wtime++;
+    } else if (p->state == SLEEPING) {
+      p->stime++;
+    }
+    release(&p->lock);
+  }
+}
+
+void
+boost_priority(void)
+{
+#ifdef SCHED_MLFQ
+  struct proc *p;
+  for (p = proc; p < &proc[NPROC]; p++) {
+    acquire(&p->lock);
+    if (p->state != UNUSED) {
+      p->queue = 0;
+      p->ticks_in_slice = 0;
+      p->enter_time = ticks;
+    }
+    release(&p->lock);
+  }
+#endif
+}
+
+int
+higher_priority_proc_runnable(int current_queue)
+{
+#ifdef SCHED_MLFQ
+  struct proc *p;
+  for (p = proc; p < &proc[NPROC]; p++) {
+    if (p->state == RUNNABLE && p->queue < current_queue) {
+      return 1;
+    }
+  }
+#endif
+  return 0;
+}
+
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
 // Scheduler never returns.  It loops, doing:
@@ -425,6 +576,100 @@ kwait(uint64 addr)
 //  - swtch to start running that process.
 //  - eventually that process transfers control
 //    via swtch back to the scheduler.
+#ifdef SCHED_MLFQ
+void
+scheduler(void)
+{
+  struct proc *p;
+  struct cpu *c = mycpu();
+
+  c->proc = 0;
+  for (;;) {
+    intr_on();
+    intr_off();
+
+    int found = 0;
+    // Strict priority: scan queues 0 (highest) to 3 (lowest)
+    for (int q = 0; q < 4; q++) {
+      struct proc *best_p = 0;
+
+      for (p = proc; p < &proc[NPROC]; p++) {
+        acquire(&p->lock);
+        if (p->state == RUNNABLE && p->queue == q) {
+          if (best_p == 0 || p->enter_time < best_p->enter_time) {
+            if (best_p)
+              release(&best_p->lock);
+            best_p = p;
+            continue;
+          }
+        }
+        release(&p->lock);
+      }
+
+      if (best_p != 0) {
+        best_p->state = RUNNING;
+        c->proc = best_p;
+        swtch(&c->context, &best_p->context);
+
+        mycpu()->intena = 0;
+        c->proc = 0;
+        found = 1;
+        release(&best_p->lock);
+        break; // restart search from queue 0
+      }
+    }
+
+    if (found == 0) {
+      asm volatile("wfi");
+    }
+  }
+}
+#elif defined(SCHED_FIFO)
+void
+scheduler(void)
+{
+  struct proc *p;
+  struct cpu *c = mycpu();
+
+  c->proc = 0;
+  for (;;) {
+    intr_on();
+    intr_off();
+
+    int found = 0;
+    struct proc *best_p = 0;
+
+    for (p = proc; p < &proc[NPROC]; p++) {
+      acquire(&p->lock);
+      if (p->state == RUNNABLE) {
+        if (best_p == 0 || p->ctime < best_p->ctime) {
+          if (best_p)
+            release(&best_p->lock);
+          best_p = p;
+          continue;
+        }
+      }
+      release(&p->lock);
+    }
+
+    if (best_p != 0) {
+      best_p->state = RUNNING;
+      c->proc = best_p;
+      swtch(&c->context, &best_p->context);
+
+      mycpu()->intena = 0;
+      c->proc = 0;
+      found = 1;
+      release(&best_p->lock);
+    }
+
+    if (found == 0) {
+      asm volatile("wfi");
+    }
+  }
+}
+#else
+// Default Round Robin
 void
 scheduler(void)
 {
@@ -468,6 +713,7 @@ scheduler(void)
     }
   }
 }
+#endif
 
 // Switch to scheduler.  Must hold only p->lock
 // and have changed proc->state. Saves and restores
@@ -503,6 +749,9 @@ yield(void)
   struct proc *p = myproc();
   acquire(&p->lock);
   p->state = RUNNABLE;
+#ifdef SCHED_MLFQ
+  p->enter_time = ticks;
+#endif
   sched();
   release(&p->lock);
 }
@@ -567,6 +816,9 @@ sleep(void)
   acquire(&p->lock);
   if (p->chan != 0) {
     p->state = SLEEPING;
+#ifdef SCHED_MLFQ
+    p->ticks_in_slice = 0;
+#endif
     sched();
   }
   release(&p->lock);
@@ -589,6 +841,10 @@ wakeup(void *chan)
       // go to sleep, also set it back to RUNNING.
       if (p->state == SLEEPING) {
         p->state = RUNNABLE;
+#ifdef SCHED_MLFQ
+        p->enter_time = ticks;
+        p->ticks_in_slice = 0;
+#endif
       }
     }
     release(&p->lock);
@@ -610,6 +866,10 @@ kkill(int pid)
       if (p->state == SLEEPING) {
         // Wake process from sleep().
         p->state = RUNNABLE;
+#ifdef SCHED_MLFQ
+        p->enter_time = ticks;
+        p->ticks_in_slice = 0;
+#endif
       }
       release(&p->lock);
       return 0;
@@ -688,6 +948,9 @@ procdump(void)
   char *state;
 
   printk("\n");
+#ifdef SCHED_MLFQ
+  printk("PID\tSTATE\tNAME\tQUEUE\tTICKS_SLICE\tWTIME\tRTIME\n");
+#endif
   for (p = proc; p < &proc[NPROC]; p++) {
     if (p->state == UNUSED)
       continue;
@@ -695,7 +958,10 @@ procdump(void)
       state = states[p->state];
     else
       state = "???";
-    printk("%d %s %s", p->pid, state, p->name);
-    printk("\n");
+#ifdef SCHED_MLFQ
+    printk("%d\t%s\t%s\t%d\t%d\t\t%d\t%d\n", p->pid, state, p->name, p->queue, p->ticks_in_slice, p->wtime, p->rtime);
+#else
+    printk("%d %s %s\n", p->pid, state, p->name);
+#endif
   }
 }

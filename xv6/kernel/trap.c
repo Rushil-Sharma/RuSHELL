@@ -9,6 +9,10 @@
 struct spinlock tickslock;
 uint ticks;
 
+#ifdef SCHED_MLFQ
+static const int slice_limit[4] = {1, 4, 8, 16};
+#endif
+
 extern char trampoline[], uservec[];
 
 // in kernelvec.S, calls kerneltrap().
@@ -82,8 +86,27 @@ usertrap(void)
     kexit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if (which_dev == 2)
+  if (which_dev == 2) {
+#ifdef SCHED_MLFQ
+    if (p && p->state == RUNNING) {
+      if (p->ticks_in_slice >= slice_limit[p->queue]) {
+        if (p->queue < 3) {
+          p->queue++;
+        }
+        p->ticks_in_slice = 0;
+        p->enter_time = ticks;
+        yield();
+      } else if (higher_priority_proc_runnable(p->queue)) {
+        p->enter_time = ticks;
+        yield();
+      }
+    }
+#elif defined(SCHED_FIFO)
+    // Non-preemptive FIFO: do not yield on timer interrupt
+#else
     yield();
+#endif
+  }
 
   prepare_return();
 
@@ -154,8 +177,28 @@ kerneltrap()
   }
 
   // give up the CPU if this is a timer interrupt.
-  if (which_dev == 2 && myproc() != 0)
+  if (which_dev == 2 && myproc() != 0) {
+#ifdef SCHED_MLFQ
+    struct proc *p = myproc();
+    if (p->state == RUNNING) {
+      if (p->ticks_in_slice >= slice_limit[p->queue]) {
+        if (p->queue < 3) {
+          p->queue++;
+        }
+        p->ticks_in_slice = 0;
+        p->enter_time = ticks;
+        yield();
+      } else if (higher_priority_proc_runnable(p->queue)) {
+        p->enter_time = ticks;
+        yield();
+      }
+    }
+#elif defined(SCHED_FIFO)
+    // Non-preemptive FIFO: do not yield on timer interrupt
+#else
     yield();
+#endif
+  }
 
   // the yield() may have caused some traps to occur,
   // so restore trap registers for use by kernelvec.S's sepc instruction.
@@ -171,6 +214,13 @@ clockintr()
     ticks++;
     wakeup(&ticks);
     release(&tickslock);
+
+    update_proc_time();
+#ifdef SCHED_MLFQ
+    if (ticks % 48 == 0) {
+      boost_priority();
+    }
+#endif
   }
 
   // ask for the next timer interrupt. this also clears
