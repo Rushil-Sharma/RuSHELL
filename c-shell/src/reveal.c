@@ -66,12 +66,12 @@ static void reveal_list_dir(const char *path, const char *display_prefix, int sh
         int is_dir = (stat(fullpath, &st) == 0 && S_ISDIR(st.st_mode));
 
         if (display_prefix == NULL || strlen(display_prefix) == 0) {
-            if (is_dir)
+            if (is_dir && recursive)
                 printf("%s/\n", names[i]);
             else
                 printf("%s\n", names[i]);
         } else {
-            if (is_dir)
+            if (is_dir && recursive)
                 printf("%s/%s/\n", display_prefix, names[i]);
             else
                 printf("%s/%s\n", display_prefix, names[i]);

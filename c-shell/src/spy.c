@@ -29,12 +29,20 @@ static int resolve_link(const char *linkpath, char *out, size_t outsize) {
     return 1;
 }
 
-// prints one row, deriving TYPE from stat() on the resolved path
-static void print_entry(const char *pid_str, const char *fd_label, const char *path) {
+// prints one row, deriving TYPE from stat() on linkpath or resolved path
+static void print_entry(const char *pid_str, const char *fd_label, const char *path, const char *linkpath) {
     struct stat st;
     const char *type = "unknown";
-    if (stat(path, &st) == 0) {
+    if (linkpath && stat(linkpath, &st) == 0) {
         type = type_from_mode(st.st_mode);
+    } else if (stat(path, &st) == 0) {
+        type = type_from_mode(st.st_mode);
+    } else if (strncmp(path, "pipe:", 5) == 0) {
+        type = "FIFO";
+    } else if (strncmp(path, "socket:", 7) == 0) {
+        type = "SOCK";
+    } else if (strstr(path, "(deleted)")) {
+        type = "REG";
     }
     printf("%s    %-3s  %s    %s\n", pid_str, fd_label, type, path);
 }
@@ -89,13 +97,13 @@ void spy_command(char **args, int argc) {
     snprintf(procdir, sizeof(procdir), "/proc/%s", pid_str);
     snprintf(linkpath, sizeof(linkpath), "%s/cwd", procdir);
     if (resolve_link(linkpath, resolved, sizeof(resolved))) {
-        print_entry(pid_str, "cwd", resolved);
+        print_entry(pid_str, "cwd", resolved, linkpath);
     }
 
     // txt (executable)
     snprintf(linkpath, sizeof(linkpath), "%s/exe", procdir);
     if (resolve_link(linkpath, resolved, sizeof(resolved))) {
-        print_entry(pid_str, "txt", resolved);
+        print_entry(pid_str, "txt", resolved, linkpath);
     }
 
     // mem: memory-mapped files, deduplicated, from /proc/<pid>/maps
@@ -103,8 +111,8 @@ void spy_command(char **args, int argc) {
     FILE *maps = fopen(linkpath, "r");
     if (maps) {
         char line[1024];
-        char seen[256][512];
-        int seen_count = 0;
+        char **seen = NULL;
+        int seen_count = 0, seen_cap = 0;
 
         while (fgets(line, sizeof(line), maps)) {
             // maps line format: addr perms offset dev inode pathname
@@ -126,13 +134,15 @@ void spy_command(char **args, int argc) {
             }
             if (dup) continue;
 
-            if (seen_count < 256) {
-                strncpy(seen[seen_count], path_part, sizeof(seen[seen_count]) - 1);
-                seen[seen_count][sizeof(seen[seen_count]) - 1] = '\0';
-                seen_count++;
+            if (seen_count >= seen_cap) {
+                seen_cap = (seen_cap == 0) ? 64 : seen_cap * 2;
+                seen = realloc(seen, (size_t)seen_cap * sizeof(char *));
             }
-            print_entry(pid_str, "mem", path_part);
+            seen[seen_count++] = strdup(path_part);
+            print_entry(pid_str, "mem", path_part, NULL);
         }
+        for (int i = 0; i < seen_count; i++) free(seen[i]);
+        free(seen);
         fclose(maps);
     }
 
@@ -169,7 +179,7 @@ void spy_command(char **args, int argc) {
         for (int i = 0; i < fdcount; i++) {
             snprintf(linkpath, sizeof(linkpath), "%s/fd/%s", procdir, fdnums[i]);
             if (resolve_link(linkpath, resolved, sizeof(resolved))) {
-                print_entry(pid_str, fdnums[i], resolved);
+                print_entry(pid_str, fdnums[i], resolved, linkpath);
             }
         }
     }

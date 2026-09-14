@@ -38,18 +38,34 @@ void locate(char **args, int argc) {
         }
 
         // then check each dir in PATH
-        char *path_copy = strdup(path_env);
-        char *dir = strtok(path_copy, ":");
-        while (dir != NULL) {
-            char full_path[2048];
-            snprintf(full_path, sizeof(full_path), "%s/%s", dir, filename);
+        const char *p = path_env;
+        while (1) {
+            const char *colon = strchr(p, ':');
+            char dir[1024];
+            if (colon) {
+                size_t len = colon - p;
+                if (len >= sizeof(dir)) len = sizeof(dir) - 1;
+                strncpy(dir, p, len);
+                dir[len] = '\0';
+            } else {
+                strncpy(dir, p, sizeof(dir) - 1);
+                dir[sizeof(dir) - 1] = '\0';
+            }
+            char full_path[4096];
+            if (dir[0] == '\0') {
+                snprintf(full_path, sizeof(full_path), "%s/%s", cwd, filename);
+            } else if (dir[0] != '/') {
+                snprintf(full_path, sizeof(full_path), "%s/%s/%s", cwd, dir, filename);
+            } else {
+                snprintf(full_path, sizeof(full_path), "%s/%s", dir, filename);
+            }
             if (is_executable(full_path)) {
                 printf("%s\n", full_path);
                 found = 1;
             }
-            dir = strtok(NULL, ":");
+            if (!colon) break;
+            p = colon + 1;
         }
-        free(path_copy);
 
         if (!found) {
             printf("locate: command not found (%s)\n", filename);

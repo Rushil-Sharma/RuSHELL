@@ -115,11 +115,18 @@ void resume_command(char **args, int argc) {
         alarm((unsigned int)timeout_secs);
     }
 
-    int status;
+    int status = 0;
+    int any_stopped = 0;
     pid_t wpid;
     while (1) {
         wpid = waitpid(-pgid, &status, WUNTRACED);
-        if (wpid > 0) break;
+        if (wpid > 0) {
+            if (WIFSTOPPED(status)) {
+                any_stopped = 1;
+                break;
+            }
+            continue;
+        }
         if (wpid == -1 && errno == EINTR) {
             if (has_timeout && timed_out) break;
             continue;
@@ -136,9 +143,8 @@ void resume_command(char **args, int argc) {
 
     if (has_timeout && timed_out) {
         kill(-pgid, SIGTERM);
-        // reap it so it doesn't linger as a zombie; SIGCHLD handler will also
-        // try, so tolerate ECHILD/no-match here
-        waitpid(-pgid, &status, 0);
+        kill(-pgid, SIGCONT);
+        while (waitpid(-pgid, &status, 0) > 0);
         printf("resume: job timed out\n");
         fflush(stdout);
         reclaim_terminal();
@@ -151,9 +157,11 @@ void resume_command(char **args, int argc) {
     reclaim_terminal();
     set_fg_active(0);
 
-    if (WIFSTOPPED(status)) {
+    if (any_stopped || WIFSTOPPED(status)) {
         int jid = mark_group_stopped(pgid);
         printf("[%d] + Stopped\t%s\n", jid, cmd_name);
+    } else {
+        group_remove(pgid);
     }
     // if it exited normally, the SIGCHLD handler already/will mark it
     // inactive and print the exit message via the normal async path

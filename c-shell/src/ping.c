@@ -53,7 +53,10 @@ void ping_command(char **args, int argc) {
             printf("ping: no such process found\n");
             return;
         }
-        kill(-pgid, actual_sig); // whole group
+        if (kill(-pgid, actual_sig) != 0) {
+            printf("ping: no such process found\n");
+            return;
+        }
         printf("Sent signal %s to %s\n", sig_str, target);
     } else {
         pid_t pid = (pid_t)strtol(num_part, NULL, 10);
@@ -61,7 +64,10 @@ void ping_command(char **args, int argc) {
             printf("ping: no such process found\n");
             return;
         }
-        kill(pid, actual_sig); // single process
+        if (kill(pid, actual_sig) != 0) {
+            printf("ping: no such process found\n");
+            return;
+        }
         printf("Sent signal %s to %s\n", sig_str, target);
     }
 }

@@ -1,5 +1,4 @@
-wsl
-exit
-snoop sleep 1
-snoop make clean
+echo hello & sleep 2 &
+activities
+echo hello & sleep 2 &
 exit()

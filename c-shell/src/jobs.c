@@ -17,13 +17,15 @@
 typedef struct {
     int job_id;
     pid_t pid;
-    char cmd_name[64];
+    char cmd_name[256];
     int active; // 1 = still running / not yet reported
+    int is_leader;
 } bg_job;
 
 typedef struct {
     pid_t pgid;
     int job_id;
+    char cmd_name[256];
     int active; // group has at least one running member
     int stopped;
 } proc_group;
@@ -94,14 +96,9 @@ static void sigchld_handler(int sig){// automatic
         }
         if (len <= 0) continue;
 
-        if (fg_active) {
-            if (pending_count < MAX_PENDING) {
-                memcpy(pending_msgs[pending_count], buf, (size_t)len + 1); // low level and fast
-                pending_count++;
-            }
-        } else {
-            if (at_prompt) write(STDOUT_FILENO, "\n", 1);
-            write(STDOUT_FILENO, buf, (size_t)len);
+        if (pending_count < MAX_PENDING) {
+            memcpy(pending_msgs[pending_count], buf, (size_t)len + 1); // low level and fast
+            pending_count++;
         }
     }
     errno = saved_errno;
@@ -111,7 +108,7 @@ void jobs_init(void){
     struct sigaction sa;
     sa.sa_handler = sigchld_handler;
     sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART;
+    sa.sa_flags = 0; // IMP: CHECK
     sigaction(SIGCHLD, &sa, NULL);
 }
 
@@ -135,9 +132,10 @@ int job_add(pid_t pid, const char *cmd_name){
         int idx = job_count;
         jobs[idx].pid = pid;
         jobs[idx].active = 1;
+        jobs[idx].is_leader = 1;
         strncpy(jobs[idx].cmd_name, cmd_name, sizeof(jobs[idx].cmd_name) - 1);
         jobs[idx].cmd_name[sizeof(jobs[idx].cmd_name) - 1] = '\0';
-        jobs[idx].job_id = next_job_number++;
+        jobs[idx].job_id = next_job_number;
         job_count++;
         job_id = jobs[idx].job_id;
     }
@@ -146,13 +144,28 @@ int job_add(pid_t pid, const char *cmd_name){
     return job_id;
 }
 
+void job_add_member_bg(int job_id, pid_t pid){
+    sigset_t prev = block_sigchld();
+    if(job_count < MAX_JOBS){
+        jobs[job_count].job_id = job_id;
+        jobs[job_count].pid = pid;
+        jobs[job_count].cmd_name[0] = '\0';
+        jobs[job_count].active = 1;
+        jobs[job_count].is_leader = 0;
+        job_count++;
+    }
+    sigprocmask(SIG_SETMASK, &prev, NULL);
+}
+
 // register a new process group (job) using pgid as its identifying pid.
 // job_id is taken as next_job_number so it lines up with whatever job_add assigns right after this is called for the same launch.
-void group_add(pid_t pgid){
+void group_add(pid_t pgid, const char *cmd_name){
     sigset_t prev = block_sigchld();
     if (group_count < MAX_JOBS){
         groups[group_count].pgid = pgid;
-        groups[group_count].job_id = next_job_number;
+        groups[group_count].job_id = next_job_number++;
+        strncpy(groups[group_count].cmd_name, cmd_name ? cmd_name : "", sizeof(groups[group_count].cmd_name) - 1);
+        groups[group_count].cmd_name[sizeof(groups[group_count].cmd_name) - 1] = '\0';
         groups[group_count].active = 1;
         groups[group_count].stopped = 0;
         group_count++;
@@ -215,7 +228,7 @@ void activities_print(void){
         int has_live = 0;
         for (int i = 0; i < proc_count; i++){
             if (procs[i].pgid == groups[g].pgid && procs[i].active &&
-                proc_state(procs[i].pid) != 0){
+                proc_state(procs[i].pid) != 0 && proc_state(procs[i].pid) != 'Z'){
                 has_live = 1;
                 break;
             }
@@ -228,7 +241,7 @@ void activities_print(void){
             if (procs[i].pgid != groups[g].pgid || !procs[i].active) continue;
 
             char st = proc_state(procs[i].pid);
-            if (st == 0) { procs[i].active = 0; continue; } // exited, drop it
+            if (st == 0 || st == 'Z') { procs[i].active = 0; continue; } // exited, drop it
 
             const char *state_str = "Running";
             if (st == 'T' || groups[g].stopped) state_str = "Stopped";

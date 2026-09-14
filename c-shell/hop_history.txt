@@ -1,0 +1,6 @@
+/mnt/c/Users/Rushil/OneDrive/Desktop/ASSignments/sem3/OSN/RuSHELL/c-shell	6	1789388792
+/mnt/c/Users/Rushil/OneDrive/Desktop/ASSignments/sem3/OSN	1	1789370596
+/mnt/c/Users/Rushil/OneDrive/Desktop/ASSignments/sem3/OSN/RuSHELL	5	1789388788
+/tmp/cshell_test	5	1789389872
+/tmp/cshell_test/alpha	4	1789388979
+/tmp/cshell_test/alpha/beta	2	1789388979

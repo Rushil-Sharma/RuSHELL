@@ -112,41 +112,40 @@ static void trace_loop(pid_t pid) {
     long cur_sys_no = -1;
     struct timespec entry_time;
     int status;
+    int sig = 0;
 
     while (1) {
-        if (ptrace(PTRACE_SYSCALL, pid, NULL, NULL) == -1) break;
+        if (ptrace(PTRACE_SYSCALL, pid, NULL, (void *)(long)sig) == -1) break;
+        sig = 0;
         if (waitpid(pid, &status, 0) == -1) break;
 
         if (WIFEXITED(status) || WIFSIGNALED(status)) break;
 
-        if (WIFSTOPPED(status) && WSTOPSIG(status) == (SIGTRAP | 0x80)) {
-            struct user_regs_struct regs;
-            if (ptrace(PTRACE_GETREGS, pid, NULL, &regs) == -1) break;
+        if (WIFSTOPPED(status)) {
+            int stopsig = WSTOPSIG(status);
+            if (stopsig == (SIGTRAP | 0x80)) {
+                struct user_regs_struct regs;
+                if (ptrace(PTRACE_GETREGS, pid, NULL, &regs) == -1) break;
 
-            if (!in_syscall) {
-                // syscall entry
-                cur_sys_no = regs.orig_rax;
-                clock_gettime(CLOCK_MONOTONIC, &entry_time);
-                in_syscall = 1;
-            } else {
-                // syscall exit
-                struct timespec exit_time;
-                clock_gettime(CLOCK_MONOTONIC, &exit_time);
-                syscall_stat *slot = get_stat_slot(cur_sys_no);
-                if (slot) {
-                    slot->calls++;
-                    slot->total_time += timespec_diff(&entry_time, &exit_time);
+                if (!in_syscall) {
+                    // syscall entry
+                    cur_sys_no = regs.orig_rax;
+                    clock_gettime(CLOCK_MONOTONIC, &entry_time);
+                    in_syscall = 1;
+                } else {
+                    // syscall exit
+                    struct timespec exit_time;
+                    clock_gettime(CLOCK_MONOTONIC, &exit_time);
+                    syscall_stat *slot = get_stat_slot(cur_sys_no);
+                    if (slot) {
+                        slot->calls++;
+                        slot->total_time += timespec_diff(&entry_time, &exit_time);
+                    }
+                    in_syscall = 0;
                 }
-                in_syscall = 0;
+            } else if (stopsig != SIGTRAP) {
+                sig = stopsig;
             }
-        } else if (WIFSTOPPED(status)) {
-            // some other signal-delivery stop (e.g. real SIGTRAP from exec,
-            // or a genuine signal) - just forward it and continue tracing
-            int sig = WSTOPSIG(status);
-            if (sig == SIGTRAP) sig = 0;
-            ptrace(PTRACE_SYSCALL, pid, NULL, (void *)(long)sig);
-            if (waitpid(pid, &status, 0) == -1) break;
-            if (WIFEXITED(status) || WIFSIGNALED(status)) break;
         }
     }
 }
@@ -193,7 +192,11 @@ void snoop_command(char **args, int argc) {
         }
 
         if (ptrace(PTRACE_ATTACH, pid, NULL, NULL) == -1) {
-            printf("snoop: no such process\n");
+            if (errno == EPERM) {
+                printf("snoop: permission denied\n");
+            } else {
+                printf("snoop: no such process\n");
+            }
             return;
         }
 

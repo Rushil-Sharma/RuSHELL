@@ -24,7 +24,7 @@ int parse_validate(const TokenList *tokens){
         }
         else if(curr->type == TOK_SEMI){
             curr = curr->next;
-            if(curr == NULL || curr->type == TOK_EOF) return 1;
+            if(curr == NULL || curr->type == TOK_EOF) return 0;
             if(curr->type != TOK_WORD) return 0;
             curr = curr->next;
         }

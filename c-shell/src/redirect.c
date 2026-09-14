@@ -29,6 +29,16 @@ static void join_args(char **args, char *out, size_t outsize) {
     }
 }
 
+static void join_pipeline(command_stage *stages, int num_stages, char *out, size_t outsize) {
+    out[0] = '\0';
+    for (int i = 0; i < num_stages; i++) {
+        if (i > 0) strncat(out, " | ", outsize - strlen(out) - 1);
+        char stage_str[256];
+        join_args(stages[i].args, stage_str, sizeof(stage_str));
+        strncat(out, stage_str, outsize - strlen(out) - 1);
+    }
+}
+
 // generates a full path out of the given command
 static char *resolve_command(const char *cmd) {
     char full_path[2048];
@@ -192,7 +202,7 @@ static int setup_output_redirection(char **output_files, int *append_flags,int o
 int execute_with_redirection(char **args,char **input_files, int input_count,char **output_files, int *append_flags, int output_count) {
     char *resolved = resolve_command(args[0]);
     if (resolved == NULL) {
-        printf("cshell: command not found (%s)\n", args[0]);
+        printf("cshell: command not found (%s)\n", (args[0][0] == '%') ? args[0] + 1 : args[0]);
         return -1;
     }
 
@@ -237,14 +247,23 @@ int execute_with_redirection(char **args,char **input_files, int input_count,cha
             dup2(out_fd, STDOUT_FILENO);
             close(out_fd);
         }
+        if (args[0][0] == '%') args[0]++;
         execv(resolved, args);
         perror("execv");
         exit(127); // convention for command not found
     } else if (pid > 0) {
-        setpgid(pid, pid); //also set from parent side, race-free either way
+        if (setpgid(pid, pid) < 0 && errno != EACCES) perror("setpgid");
+        if (writer_pid > 0) {
+            if (setpgid(writer_pid, pid) < 0 && errno != EACCES && errno != ESRCH) perror("setpgid");
+            group_add_member(pid, writer_pid, "<redirect_in>");
+        }
+        if (reader_pid > 0) {
+            if (setpgid(reader_pid, pid) < 0 && errno != EACCES && errno != ESRCH) perror("setpgid");
+            group_add_member(pid, reader_pid, "<redirect_out>");
+        }
         char cmdline[256];
         join_args(args, cmdline, sizeof(cmdline));
-        group_add(pid);              //register the group (job) for activities
+        group_add(pid, cmdline);              //register the group (job) for activities
         group_add_member(pid, pid, cmdline); //register the single member
         give_terminal_to(pid);
 
@@ -265,7 +284,7 @@ int execute_with_redirection(char **args,char **input_files, int input_count,cha
             printf("[%d] + Stopped\t%s\n", jid, cmdline);
             return 0;
         }
-        if (WIFEXITED(status) && WEXITSTATUS(status) == 127) return -1;
+        group_remove(pid);
         return 0;  
     } else {
         perror("fork");
@@ -317,7 +336,6 @@ int execute_pipeline(command_stage *stages, int num_stages) {
     int in_fd[num_stages], out_fd[num_stages];   // extra fds from file redirection, -1 if none
     int child_pid[num_stages];
     int aborted = 0;
-    int any_resolve_failed = 0;
 
     for (int i = 0; i < num_stages; i++) {
         resolved[i] = NULL;
@@ -337,8 +355,7 @@ int execute_pipeline(command_stage *stages, int num_stages) {
         }
         resolved[i] = resolve_command(stages[i].args[0]);
         if (resolved[i] == NULL) {
-            printf("cshell: command not found (%s)\n", stages[i].args[0]);
-            any_resolve_failed = 1;
+            printf("cshell: command not found (%s)\n", (stages[i].args[0][0] == '%') ? stages[i].args[0] + 1 : stages[i].args[0]);
         }
     }
 
@@ -391,24 +408,35 @@ int execute_pipeline(command_stage *stages, int num_stages) {
             if (in_fd[i] != -1) close(in_fd[i]);
             if (out_fd[i] != -1) close(out_fd[i]);
 
+            if (stages[i].args[0][0] == '%') stages[i].args[0]++;
             execv(resolved[i], stages[i].args);
             perror("execv");
             exit(127);
         } else if (pid > 0) {
             child_pid[i] = pid;
-            setpgid(pid, (i == 0) ? pid : child_pid[0]); // also from parent side, race-free
+            if (setpgid(pid, (i == 0) ? pid : child_pid[0]) < 0 && errno != EACCES) perror("setpgid");
         } else {
             perror("fork");
         }
     }
 
     if (child_pid[0] > 0) {
-        group_add(child_pid[0]);
+        char full_cmdline[256];
+        join_pipeline(stages, num_stages, full_cmdline, sizeof(full_cmdline));
+        group_add(child_pid[0], full_cmdline);
         for (int i = 0; i < num_stages; i++) {
             if (child_pid[i] > 0) {
                 char cmdline[256];
                 join_args(stages[i].args, cmdline, sizeof(cmdline));
                 group_add_member(child_pid[0], child_pid[i], cmdline);
+            }
+            if (writer_pid[i] > 0) {
+                if (setpgid(writer_pid[i], child_pid[0]) < 0 && errno != EACCES && errno != ESRCH) perror("setpgid");
+                group_add_member(child_pid[0], writer_pid[i], "<redirect_in>");
+            }
+            if (reader_pid[i] > 0) {
+                if (setpgid(reader_pid[i], child_pid[0]) < 0 && errno != EACCES && errno != ESRCH) perror("setpgid");
+                group_add_member(child_pid[0], reader_pid[i], "<redirect_out>");
             }
         }
     }
@@ -440,21 +468,22 @@ int execute_pipeline(command_stage *stages, int num_stages) {
 
     if (WIFSTOPPED(leader_status)) {
         int jid = mark_group_stopped(child_pid[0]);
-        char cmdline0[256];
-        join_args(stages[0].args, cmdline0, sizeof(cmdline0));
-        printf("[%d] + Stopped\t%s\n", jid, cmdline0);
+        char full_cmdline[256];
+        join_pipeline(stages, num_stages, full_cmdline, sizeof(full_cmdline));
+        printf("[%d] + Stopped\t%s\n", jid, full_cmdline);
         return 0;
     }
-    return any_resolve_failed ? -1 : 0;
+    if (child_pid[0] > 0) group_remove(child_pid[0]);
+    return 0;
 }
 
 // Forks args[0] in the background: never waits on it (SIGCHLD handler does
 // the reaping/reporting), and gives it /dev/null on stdin unless the
 // command has its own "<" redirection, so it never reads the real terminal.
-static int execute_with_redirection_bg(char **args, char **input_files, int input_count,char **output_files, int *append_flags, int output_count,pid_t *out_pid) {
+static int execute_with_redirection_bg(char **args, char **input_files, int input_count,char **output_files, int *append_flags, int output_count,pid_t *out_pid, int sync_fd, int sync_write_fd) {
     char *resolved = resolve_command(args[0]);
     if (resolved == NULL) {
-        printf("cshell: command not found (%s)\n", args[0]);
+        printf("cshell: command not found (%s)\n", (args[0][0] == '%') ? args[0] + 1 : args[0]);
         return -1;
     }
 
@@ -486,7 +515,8 @@ static int execute_with_redirection_bg(char **args, char **input_files, int inpu
     int pid = fork();
     if (pid == 0) {
         sigprocmask(SIG_SETMASK, &prev, NULL); // restore mask for the exec'd program
-        setpgid(0, 0); // standalone background command = its own process group
+        if (setpgid(0, 0) < 0 && errno != EACCES) perror("setpgid");
+        if (sync_write_fd != -1) close(sync_write_fd); // close our own copy of the write end, so read() below sees EOF once the parent closes its copy
         if (in_fd != -1) {
             dup2(in_fd, STDIN_FILENO);
             close(in_fd);
@@ -495,11 +525,25 @@ static int execute_with_redirection_bg(char **args, char **input_files, int inpu
             dup2(out_fd, STDOUT_FILENO);
             close(out_fd);
         }
+        if (args[0][0] == '%') args[0]++;
+        if (sync_fd != -1) {
+            char dummy;
+            if (read(sync_fd, &dummy, 1) < 0) {}
+            close(sync_fd);
+        }
         execv(resolved, args);
         perror("execv");
         exit(127);
     } else if (pid > 0) {
-        setpgid(pid, pid); // also from parent side, race-free either way
+        if (setpgid(pid, pid) < 0 && errno != EACCES) perror("setpgid");
+        if (writer_pid > 0) {
+            if (setpgid(writer_pid, pid) < 0 && errno != EACCES && errno != ESRCH) perror("setpgid");
+            group_add_member(pid, writer_pid, "<redirect_in>");
+        }
+        if (reader_pid > 0) {
+            if (setpgid(reader_pid, pid) < 0 && errno != EACCES && errno != ESRCH) perror("setpgid");
+            group_add_member(pid, reader_pid, "<redirect_out>");
+        }
         if (in_fd != -1) close(in_fd);
         if (out_fd != -1) close(out_fd);
         *out_pid = pid;
@@ -524,15 +568,22 @@ int execute_background(command_stage *stages, int num_stages) {
 
     if (num_stages == 1) {
         pid_t pid;
-        int rc = execute_with_redirection_bg(stages[0].args, stages[0].input_files, stages[0].input_count,stages[0].output_files, stages[0].append_flags, stages[0].output_count,&pid);
-        if (rc < 0) return -1;
+        int sync_pipe[2];
+        if (pipe(sync_pipe) == -1) sync_pipe[0] = sync_pipe[1] = -1;
+        int rc = execute_with_redirection_bg(stages[0].args, stages[0].input_files, stages[0].input_count,stages[0].output_files, stages[0].append_flags, stages[0].output_count,&pid, sync_pipe[0], sync_pipe[1]);
+        if (sync_pipe[0] != -1) close(sync_pipe[0]);
+        if (rc < 0) {
+            if (sync_pipe[1] != -1) close(sync_pipe[1]);
+            return -1;
+        }
         char cmdline[256];
         join_args(stages[0].args, cmdline, sizeof(cmdline));
         int job_id = job_add(pid, cmdline);
-        group_add(pid); // register group (pgid == pid, group leader)
+        group_add(pid, cmdline); // register group (pgid == pid, group leader)
         group_add_member(pid, pid, cmdline); // register the single member
         printf("[%d] %d\n", job_id, (int)pid);
         fflush(stdout);
+        if (sync_pipe[1] != -1) close(sync_pipe[1]);
         return 0;
     }
 
@@ -574,7 +625,7 @@ int execute_background(command_stage *stages, int num_stages) {
         }
         resolved[i] = resolve_command(stages[i].args[0]);
         if (resolved[i] == NULL) {
-            printf("cshell: command not found (%s)\n", stages[i].args[0]);
+            printf("cshell: command not found (%s)\n", (stages[i].args[0][0] == '%') ? stages[i].args[0] + 1 : stages[i].args[0]);
         }
     }
 
@@ -595,22 +646,22 @@ int execute_background(command_stage *stages, int num_stages) {
     sigaddset(&block, SIGCHLD);
     sigprocmask(SIG_BLOCK, &block, &prev);
 
+    int sync_pipe[2];
+    if (pipe(sync_pipe) == -1) sync_pipe[0] = sync_pipe[1] = -1;
+
     for (int i = 0; i < num_stages; i++) {
         if (resolved[i] == NULL) continue;
 
         int pid = fork();
         if (pid == 0) {
             sigprocmask(SIG_SETMASK, &prev, NULL);
-            setpgid(0, (i == 0) ? 0 : child_pid[0]); // join group led by first stage
+            if (setpgid(0, (i == 0) ? 0 : child_pid[0]) < 0 && errno != EACCES) perror("setpgid");
 
             if (stages[i].input_count > 0) {
                 dup2(in_fd[i], STDIN_FILENO);
             } else if (i > 0) {
                 dup2(pipefds[i - 1][0], STDIN_FILENO);
-            } //else {
-            //     int devnull = open("/dev/null", O_RDONLY);
-            //     if (devnull != -1) { dup2(devnull, STDIN_FILENO); close(devnull); }
-            // }
+            }
 
             if (stages[i].output_count > 0) {
                 dup2(out_fd[i], STDOUT_FILENO);
@@ -622,12 +673,18 @@ int execute_background(command_stage *stages, int num_stages) {
             if (in_fd[i] != -1) close(in_fd[i]);
             if (out_fd[i] != -1) close(out_fd[i]);
 
+            if (stages[i].args[0][0] == '%') stages[i].args[0]++;
+            if (sync_pipe[0] != -1) {
+                char dummy;
+                if (read(sync_pipe[0], &dummy, 1) < 0) {}
+                close(sync_pipe[0]);
+            }
             execv(resolved[i], stages[i].args);
             perror("execv");
             exit(127);
         } else if (pid > 0) {
             child_pid[i] = pid;
-            setpgid(pid, (i == 0) ? pid : child_pid[0]); // also from parent side, race-free
+            if (setpgid(pid, (i == 0) ? pid : child_pid[0]) < 0 && errno != EACCES) perror("setpgid");
         } else {
             perror("fork");
         }
@@ -639,22 +696,34 @@ int execute_background(command_stage *stages, int num_stages) {
         if (out_fd[i] != -1) close(out_fd[i]);
     }
 
+    if (sync_pipe[0] != -1) close(sync_pipe[0]);
     int rc = 0;
     if (child_pid[0] > 0) {
-        char cmdline0[256];
-        join_args(stages[0].args, cmdline0, sizeof(cmdline0));
-        int job_id = job_add(child_pid[0], cmdline0);
-        group_add(child_pid[0]);
+        char full_cmdline[256];
+        join_pipeline(stages, num_stages, full_cmdline, sizeof(full_cmdline));
+        int job_id = job_add(child_pid[0], full_cmdline);
+        group_add(child_pid[0], full_cmdline);
         for (int i = 0; i < num_stages; i++) {
             if (child_pid[i] > 0) {
+                if (i > 0) job_add_member_bg(job_id, child_pid[i]);
                 char cmdline[256];
                 join_args(stages[i].args, cmdline, sizeof(cmdline));
                 group_add_member(child_pid[0], child_pid[i], cmdline); // E1
             }
+            if (writer_pid[i] > 0) {
+                if (setpgid(writer_pid[i], child_pid[0]) < 0 && errno != EACCES && errno != ESRCH) perror("setpgid");
+                group_add_member(child_pid[0], writer_pid[i], "<redirect_in>");
+            }
+            if (reader_pid[i] > 0) {
+                if (setpgid(reader_pid[i], child_pid[0]) < 0 && errno != EACCES && errno != ESRCH) perror("setpgid");
+                group_add_member(child_pid[0], reader_pid[i], "<redirect_out>");
+            }
         }
         printf("[%d] %d\n", job_id, (int)child_pid[0]);
         fflush(stdout);
+        if (sync_pipe[1] != -1) close(sync_pipe[1]);
     } else {
+        if (sync_pipe[1] != -1) close(sync_pipe[1]);
         rc = -1;
     }
     sigprocmask(SIG_SETMASK, &prev, NULL);

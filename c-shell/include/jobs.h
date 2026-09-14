@@ -6,11 +6,12 @@
 
 void jobs_init();
 int job_add(pid_t pid, const char *cmd_name);
+void job_add_member_bg(int job_id, pid_t pid);
 void set_fg_active(int active);
 void set_at_prompt(int flag);
 void flush_pending_bg_messages(void);
 
-void group_add(pid_t pgid);
+void group_add(pid_t pgid, const char *cmd_name);
 void group_add_member(pid_t pgid, pid_t pid, const char *cmd_name);
 void activities_print(void);
 

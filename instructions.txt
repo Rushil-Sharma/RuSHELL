@@ -1,1 +1,162 @@
 hop ..
+hop ..
+hop ~
+reveal ~
+reveal -t
+Q2. [MP Section A]
+Doubt: C-shell requires us to build a lexer and parser, so can we use the xv6 repo's code as a boiler plate for the c-shell or do we need to build everything from scratch
+Answer: [AD] No. The C-Shell part of the project needs to be built from scratch. Also the grammar used in C-shell is very different from what has been implemented in xv6.
+Q3. [MP Section B]
+Doubt: For reveal -a, do . and .. count as hidden entries (since they technically start with .)? The -t/-ta example in the spec doesn't show . or .. anywhere, so I'm assuming they're excluded even with -a
+Answer: [AD] Yes, they are excluded.
+reveal -a means show dotfiles, so it acts like ls -A, not ls -a. If . and .. were listed, -t would recurse forever
+Q4. [MP Section A-C]
+Doubt: Is the use of rlwrap permitted? It makes it easier to use arrow keys for command history and navigation within a command.
+Answer: [AD] You can use whatever you want as long as shell.out properly builds and runs on its own.
+Your Makefile cannot depend on rlwrap and the evaluation will also run the bare binary. However, using it to test Phases D and later might not work because rlwrap holds the terminal and not the shell.
+Q5. [MP Section A]
+Doubt: for lexer part ,input like hello|hi wld output like word(hello)op_pipe word(hi) so we wld break at all ops and whitespaces for words what abt hello"hi"hiii is this 3 words like word(hello)word(hi)word(hiii) or is it word(hellohihiii) same doubt for single quote also
+Answer: [AD] WORD(hellohihiii)
+WORD -> fragment+ has no separator, so fragments that touch get joined. Same for single quotes, and you can mix them.
+Words end at whitespace or an unquoted operator, so hello|hi is right. "a|b" is one word.
+"" adds nothing: a""b is WORD(ab), and a bare "" is a WORD with an empty value.
+Q6. [MP Section A-C]
+Doubt: We are allowed to use any functions in libc right? Obviously provided that they don't end up calling the syscalls that are banned transitively.
+Answer: [AD] Any POSIX functions, yes.
+Q7. [MP Section B]
+Doubt: The hop frequency lookup DS needs to be persistent for different sessions of the shell as well?
+Answer: [AD] Yes. Format and location are yours to pick, but it should be persistent as long as shell is launched from the same folder.
+Q8. [MP Section B]
+Doubt: for reveal -a is the result to be like the normal ls output with the delimeter being " " or should it be "\n" since there is no example in the question doc which has just a reveal -a
+Answer: [AD] For reveal: delimiter is \n for every flag combination
+Q9. [MP Section A]
+Doubt: The tokenizer grammar currently allows strings like abc"123"'def'"hi" to be parsed. This will parse into abc123defhi. Is that intended?
+Answer: [AD] Yes.
+Q10. [MP Section B]
+Doubt: if i do hop name1 name2 assuming name1 and name2 are valid i will at the end of command be in name2 dir so in the frecency table both name1 and name2 will be added? and if name2 is not valid but name1 was valid will name1 be added to the table and also if name2 failed means hop name1 name2 as a whole command failed so my pwd will be name1 or remain how it was before the command
+Answer: [AD] Both get recorded, each argument is its own hop. If name2 fails, you stay in name1.
+Q11. [MP Section A]
+Doubt: Given Grammar treats redirect targets as WORD only, so 2>&1 tokenizes 2 as a plain argument and &1 breaks parsing. Is fd-duplication syntax (2>&1, >&2, etc.) required for mp1 Parts AC, or is basic <, >, >> redirection sufficient?
+Answer: [AD] <, >, >> is all you need.
+Q12. [MP Section B]
+Doubt: if i do hop name1 name2 assuming name1 and name2 are valid, now if i do hop -, should i end up in name1 or in the dir where i called hop name1 name2? also should previous cwd be persistent across sessions?
+Answer: [AD] hop - takes you to name1, same as cd -. The previous directory is not persistent across sessions, only the frecency store is.
+Q13. [MP Section B]
+Doubt: The syntax for locate takes filename*, where I'm assuming the * means zero or more. What do I do if no arguments are passed to locate?
+Answer: [AD] Yes, zero or more. With no arguments, print locate: invalid syntax.
+Q14. [General]
+Doubt: After cloning xv6 directory into the project there are multiple files in it, Do I need to strictly follow the directory structure specified in the document and delete all other files inside xv6 like .gitignore, test-xv6.py, README.md, etc. or I can keep them?
+Answer: [AD] You should keep them. The file structure shows what must exist. There is no issue with additional files.
+Q15. [MP Section B]
+Doubt: In part B3 i.e peek, the requirement says "For seekable input (regular files), use lseek to read the file backwards in fixed-size chunks rather than loading it all into memory at once." Can we use fseek (stdio API) instead for this part?
+Answer: [AD] No, use lseek.
+Q16. [MP Section B]
+Doubt: By path is it referring to the environment variable $PATH
+Answer: [VR] Yes.
+Q16. [MP Section B]
+Doubt: In peek, if -r is not present, then do we still need to use lseek for seekable files? Or can we just use library APIs such as open and read? Also, for counting lines, can we read the whole file in one go?
+Answer: [VR] You may use read and open when -r flag is not specified. For counting lines, do not load the entire file into the memory. Process them in fixed-size chunks.
+Q17. [MP Section B]
+Doubt: Are we supposed to handle the -r case for the the stdin situations of peek, i.e, are peek -r and peek -r - supposed to be accepted or throw an error, also how should peek react to files not found or filename is a dir for multiple file inputs, should it throw error and then keep going like in locate or should it stop the whole run
+Answer: [VR] Yes, you are required to handle cases of - and -r together.
+In such cases, you must accept input from stdin and then print it in reverse order. If multiple arguments are provided and one of them throws an error, print the error for that particular argument and process the remaining argumets.
+Q18. [MP Section B]
+Doubt: For reveal, are flags required to come before the path? For example, should reveal src -a be treated as invalid syntax while reveal -a src is valid? If it is invalid, should the error be printed to stderr?
+Answer: [AD] Yes. According to the writeup, the syntax is reveal (-(a|t)*)* (~ | . | .. | - | name)?.
+Q19. [MP Section B]
+Doubt: While sorting entries lexicographically by ASCII value in reveal, should directories be compared using just their names (e.g. src) or including the trailing / used in the output (e.g. src/)? This can affect the ordering in cases like src/ and src.c.
+Answer: [AD] Sort by the bare name, no trailing slash. (because the / is just for display purposes)
+Q20. [MP Section B]
+Doubt: locate command in part B shd it check if a file can be executed by user or shd we see if the file can be executed by any one of the user?
+Answer: [AD] The current user.
+Q21. [MP Section B]
+Doubt: the peek command
+line indexing is not actual file lines right it's just the i th non empty line
+And also
+even if I do peek -n
+I shd print empty lines right just not index them cuz examples in site seems like it
+Answer: [AD] Both are correct. The number is the count of non-empty lines seen so far, not the file's actual line number. Empty lines will still print (without a number)
+Q22. [MP Section C]
+Doubt: Are the builtin commands we implemented in Part B supposed to be handled in Part C? or do we just have to take care *.sh files and existing commands like echo, cat etc.?
+Answer: [AD] Yes. Builtins (Intrinsics) are treated the same way as external programs in the grammar (both are CMD), and all the functionality in Part C and later needs to support the instrinsics as well.
+Q23. [MP Section B]
+Doubt: Should hop . increase frecency?
+Answer: [AD] No. No real hop happened, so you don't need to update the frecency store.
+Q24. [MP Section B]
+Doubt: Should hop ~ increase frecency if we are already in home directory? or in any case, if the hop is explicitly called to hop into the folder that we are already in (say by using absolute path)?
+Answer: [AD] Yes.
+Explanation
+`~` and an absolute path are both real resolutions to a directory, requirement 1 says a successful hop updates frecency, it doesn't say "only if the directory changes." `.` is explicitly a no-op so that case doesn't count.
+Q25. [MP Section B]
+Doubt: the frecency of hop changes only if dir changes? for example i do hop / being in / then dir didnt change.
+Answer: [AD] See Q24.
+tl;dr: the dir doesnt have to change for frecency update.
+Q26. [MP Section B]
+Doubt: for the hop frecency is it nessesary to create an algorithm which decides the recency using timestamp, or can I just implement it by modifying the score each time a new location is opened?
+Answer: [AD] Either is fine.
+From the writeup:
+Scoring, decay, and storage are up to you, but must be deterministic.
+Q27. [MP Section B]
+Doubt: For reveal if we use -a without a -t flag should we still show / after the name of the the files which are directories, with or without any flags if a directory has a blank space in the name of the file, should it be within single quotes as it is in ls
+Answer: [AD] No. The trailing / is only for -t.
+Q28. [MP Section B]
+Doubt: reveal -t is supposed to recusively show the inside of every sub directory as well right, if we did reveal -t / this should show all the files in the computer right?
+Answer: [AD] Shows all non-hidden files, yes.
+Q29. [MP Section A]
+Doubt in a complex command that uses pipes like like wc -l < out.txt | sort -r & echo "done", should the '&' operator apply to sort or the entire pipeline behind it? the doubt might sound dumb because it makes sense to run the entire pipeline in the background, this is just to confirm since the doc doesn't mention explicitly. Thanks !
+Answer: [AD] The entire pipeline.
+Q30. [MP Section B]
+Doubt: with or without any flags if a directory has a blank space in the name of the file, should it be within single quotes as it is in ls (reveal)
+Answer: [VR] Yes.
+Q31. [MP Section C]
+Doubt: In Part C3, when there are multiple output files like echo hi > a.txt >> b.txt > c.txt, can we write the command's output into a temporary file first and then copy it into all the files, or do we have to pipe/stream it directly while the command is running?
+Answer: [VR] You can use a temporary file.
+Q32. [MP Section C1]
+Doubt: For executing the command, should scripts with shebangs be executed with that interpreter?
+Answer: [AD] Yes, but AFAIK this should be handled by the kernel directly and you don't have to do anything special.
+Q33. [MP Section B3]
+Doubt: In peek command, when multiple files (for example 2 files with 2 non empty lines) are used with -n, should line numbering continue across all files (1,2,3,4) or restart for each file (1,2,1,2)? Similarly, with -nr, should numbering be 2,1,2,1, 4,3,2,1, or 2,1,4,3?
+Answer: [AD] Continuous 1,2,3,4 (no restarting)
+For -nr it's 2,1,4,3. Number stays tied to line's original position. Reversing just changes display order.
+Q34. [MP Section C2]
+Doubt: In the example, echo "line one" > a.txt, is it pre-assumed that a.txt is there in the directory, or when we give this prompt, the file a.txt gets created? because the second point of C2 states that "If any file does not exist or cannot be opened, the shell must print cshell: no such file or directory and not execute the command.", so that means a.txt should be there and then we gave this prompt?
+Answer: [VR] For output redirection (>/>>), if the file does not exist, the shell creates it. So, echo "line one" > a.txt creates a.txt if a.txt does not already exist. For input redirection (<), the file must already exist for the shell to take input from it. It will not create the file. So, cat < a.txt only works if the a.txt already exists, it throws an error if the file does not exist.
+Q35. [MP Section B4]
+Doubt: Should we print the cannonical path or the path that is found in directory in case of symlinked executables?
+Answer: [VR] You do not need to resolve the symlink, print the path that is found in the directory.
+Q36.[MP Section B3]
+Doubt: For things like peak -nr -filename, should we consider "-filename" as a filename or flags when encountered, as filename can have hyphen at index 0.
+Also for input like
+peek file1 -
+cd ..
+home ~
+hop ~
+reveal -ta
+peek
+peek readme.md
+peek ai_usage.md
+locate java
+locate man python 
+locate bin
+locate sude
+locate sudo
+echo hello
+ls
+build.sh
+cat < hop_history.txt
+ls
+cat < AI_usage.md
+printf "banana\napple" | sort
+echo "hello" | echo "world"
+echo "hello" ; echo "world"
+echo hello & sleep 10 &
+echo hello & sleep 10 &
+echo hello & sleep 0 
+echo hello & sleep 0 &
+sleep 100 &
+cat | sort &
+activities
+sleep 1
+activities
+hop ~
+hop ~

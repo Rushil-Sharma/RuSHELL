@@ -15,7 +15,7 @@
 #include "jobs.h"
 #include "resume.h"
 #include "ping.h"
-#include "history.h"
+// #include "history.h"
 #include "spy.h"
 #include "snoop.h"
 
@@ -24,7 +24,7 @@
 #define MAX_ARGS 100
 
 static int is_builtin(const char *name) {
-    if(strcmp(name,"hop") == 0 || strcmp(name,"reveal") == 0 || strcmp(name,"locate") == 0 || strcmp(name,"peek") == 0 || strcmp(name,"activities") == 0 || strcmp(name,"resume") == 0 || strcmp(name,"ping") == 0 || strcmp(name,"spy") || strcmp(name,"snoop")) return 1;
+    if(strcmp(name,"hop") == 0 || strcmp(name,"reveal") == 0 || strcmp(name,"locate") == 0 || strcmp(name,"peek") == 0 || strcmp(name,"activities") == 0 || strcmp(name,"resume") == 0 || strcmp(name,"ping") == 0 || strcmp(name,"spy") == 0 || strcmp(name,"snoop") == 0) return 1;
     return 0;
 }
 static int prev_ctrld = 0;
@@ -45,15 +45,12 @@ int main(){
     char* home_directory;
     home_directory = prompt_init();
     char command[STRING_SIZE];
-    // Clear hop_history & pre_dir.txt;
-    FILE *file_ptr = fopen("./hop_history.txt", "w");
-    fclose(file_ptr);
     FILE *file_ptr2 = fopen("./prev_dir.txt", "w");
     fclose(file_ptr2);
     
     jobs_init(); // initializing SIGCHLD handler for background jobs
     terminal_init();
-    history_init();
+    // history_init();
     while(1){
     //Definations
         char *prompt = NULL;
@@ -61,12 +58,13 @@ int main(){
     //Code
         //print prompt
         prompt = prompt_printer(); 
+        flush_pending_bg_messages(); // print any background job exit messages right before a fresh prompt
         printf("%s ",prompt); // prints the prompt 
         fflush(stdout);
         set_at_prompt(1); // shell is at prompt, waiting for user
 
         //Take command
-        if(history_read_line(command, STRING_SIZE, prompt) == NULL){
+        if(fgets(command, STRING_SIZE, stdin) == NULL){
             if (errno == EINTR) {
                 clearerr(stdin);
                 continue;
