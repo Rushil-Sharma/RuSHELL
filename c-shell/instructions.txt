@@ -1,7 +1,5 @@
-spy make clean
-make clean
-make 
-activities
-spy 533
-make clean
+wsl
+exit
+snoop sleep 1
+snoop make clean
 exit()
