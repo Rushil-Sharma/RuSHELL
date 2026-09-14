@@ -15,6 +15,7 @@
 #include "jobs.h"
 #include "resume.h"
 #include "ping.h"
+#include "history.h"
 
 #define STRING_SIZE 4096
 #define MAX_STAGES 64
@@ -50,6 +51,7 @@ int main(){
     
     jobs_init(); // initializing SIGCHLD handler for background jobs
     terminal_init();
+    history_init();
     while(1){
     //Definations
         char *prompt = NULL;
@@ -58,10 +60,11 @@ int main(){
         //print prompt
         prompt = prompt_printer(); 
         printf("%s ",prompt); // prints the prompt 
+        fflush(stdout);
         set_at_prompt(1); // shell is at prompt, waiting for user
 
         //Take command
-        if(fgets(command, STRING_SIZE, stdin) == NULL){
+        if(history_read_line(command, STRING_SIZE, prompt) == NULL){
             if (errno == EINTR) {
                 clearerr(stdin);
                 continue;

@@ -1,0 +1,11 @@
+make
+make clean
+make
+hop ..
+w
+sleep 100
+activites
+sleep 1
+sleep 100
+print "hello"
+exit()

@@ -240,11 +240,17 @@ void activities_print(void){
     sigprocmask(SIG_SETMASK, &prev, NULL);
 }
 
+volatile sig_atomic_t got_sigint = 0;
+
 static void sigint_handler(int sig) { 
     (void)sig;
-    write(STDOUT_FILENO, "\n", 1);
+    got_sigint = 1;
+    write(STDOUT_FILENO, "^C\n", 3);
 }
-static void sigtstp_handler(int sig) { (void)sig; }
+static void sigtstp_handler(int sig) { 
+    (void)sig; 
+    write(STDOUT_FILENO, "^Z\n", 3);
+}
 
 void terminal_init(void) {
     shell_pgid = getpid();

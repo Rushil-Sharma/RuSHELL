@@ -27,4 +27,7 @@ void group_remove(pid_t pgid);
 
 int pid_is_tracked(pid_t pid);// Returns 1 if pid belongs to a process this shell spawned and is still tracking (i.e. still active in the internal proc table), else 0.
 
+#include <signal.h>
+extern volatile sig_atomic_t got_sigint;
+
 #endif
