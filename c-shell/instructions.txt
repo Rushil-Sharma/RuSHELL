@@ -1,11 +1,7 @@
-make
+spy make clean
 make clean
-make
-hop ..
-w
-sleep 100
-activites
-sleep 1
-sleep 100
-print "hello"
+make 
+activities
+spy 533
+make clean
 exit()
